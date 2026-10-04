@@ -13,9 +13,10 @@
       {
         "title": "PromptPal",
         "width": 445,
-        "height": 325,
+        "height": 310,
         "decorations": false,
         "transparent": true,
+        "shadow": false,
         "resizable": true
       }
     ],

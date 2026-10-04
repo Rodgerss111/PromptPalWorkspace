@@ -135,7 +135,8 @@ export function TemplateLibrary({
             }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
                 <h3 style={{ margin: 0, fontSize: '16px' }}>{t.name}</h3>
-                <button 
+                <button
+                  className="favorite-button"
                   style={{ background: 'none', border: 'none', cursor: mutationsDisabled ? 'not-allowed' : 'pointer', fontSize: '18px', opacity: mutationsDisabled ? 0.5 : 1 }}
                   onClick={() => onToggleFavorite(t.id)}
                   disabled={mutationsDisabled}

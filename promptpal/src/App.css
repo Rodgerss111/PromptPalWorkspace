@@ -32,6 +32,8 @@
   
   /* System Messages - Apple SF Red for errors */
   --danger-text: #DE3618;
+  --favorite-color: #6E6E73;
+  --favorite-active-color: #B7791F;
 }
 
 .dark-theme {
@@ -52,6 +54,8 @@
   
   /* System Messages - Vibrant system red for dark backgrounds */
   --danger-text: #FF453A;
+  --favorite-color: #C8D0DC;
+  --favorite-active-color: #FFD166;
 }
 
 body {
@@ -66,18 +70,32 @@ body {
 html {
   background: transparent;
   min-height: 100%;
+  border: 0;
+  outline: 0;
 }
 
 #root {
   background-color: var(--bg-color);
   border-radius: 20px;
-  border: none;
+  border: 0;
+  outline: 0;
   box-shadow: none;
+  background-clip: padding-box;
   height: 100vh;
   display: flex;
   flex-direction: column;
   box-sizing: border-box;
   overflow: hidden;
+}
+
+html,
+body,
+#root {
+  -webkit-appearance: none;
+  appearance: none;
+  background-image: none;
+  border: 0;
+  outline: 0;
 }
 input, textarea {
   -webkit-app-region: no-drag;
@@ -131,6 +149,9 @@ button.primary {
 
 button.primary:hover { background-color: var(--accent-hover); }
 button.primary:disabled { opacity: 0.5; cursor: not-allowed; }
+
+.favorite-button { color: var(--favorite-color); }
+.favorite-button[aria-pressed="true"] { color: var(--favorite-active-color); }
 
 button.secondary {
   -webkit-app-region: no-drag;
