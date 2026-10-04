@@ -503,7 +503,11 @@ export default function App() {
         </button>
       )}
       {(initStatus !== 'success' || initError || globalError) && (
-        <div role="status" aria-live="polite" style={{ padding: '8px 20px 0' }}>
+        <div
+          className={globalError === 'Please enter instructions to build a prompt.' ? 'status-region status-region--validation' : 'status-region'}
+          role="status"
+          aria-live="polite"
+        >
           {initError || globalError || (initStatus === 'loading' ? 'Loading templates…' : null)}
         </div>
       )}
