@@ -1,0 +1,44 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "promptpal-storage",
+  "description": "Snapshot storage for the main window only",
+  "windows": [
+    "main"
+  ],
+  "permissions": [
+    "fs:allow-exists",
+    "fs:allow-read-text-file",
+    "fs:allow-write-text-file",
+    "fs:allow-remove",
+    "fs:allow-mkdir",
+    {
+      "identifier": "fs:scope",
+      "allow": [
+        {
+          "path": "$APPDATA"
+        },
+        {
+          "path": "$APPDATA/promptpal-a.json"
+        },
+        {
+          "path": "$APPDATA/promptpal-b.json"
+        },
+        {
+          "path": "$APPDATA/promptpal-reset.json"
+        },
+        {
+          "path": "$APPDATA/promptpal_data.json"
+        },
+        {
+          "path": "$APPDATA/promptpal_data.bak.json"
+        },
+        {
+          "path": "$APPDATA/promptpal_data.bak.json.tmp"
+        },
+        {
+          "path": "$APPDATA/promptpal_data.corrupt.json"
+        }
+      ]
+    }
+  ]
+}

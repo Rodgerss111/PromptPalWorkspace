@@ -1,0 +1,26 @@
+{
+  "productName": "PromptPal",
+  "version": "0.1.0",
+  "identifier": "com.promptpal.dev",
+  "build": {
+    "beforeDevCommand": "npm run dev",
+    "beforeBuildCommand": "npm run build",
+    "devUrl": "http://localhost:1420",
+    "frontendDist": "../dist"
+  },
+  "app": {
+    "windows": [
+      {
+        "title": "PromptPal",
+        "width": 445,
+        "height": 325,
+        "decorations": false,
+        "transparent": true,
+        "resizable": true
+      }
+    ],
+    "security": {
+      "csp": null
+    }
+  }
+}
