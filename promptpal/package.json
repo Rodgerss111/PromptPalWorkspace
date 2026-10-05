@@ -32,6 +32,7 @@
     "check:uia": "cargo check --manifest-path src-tauri/Cargo.toml --features uia-diagnostics",
     "check:release": "npm run check:reproducible && npm run check:frontend && npm run check:rust",
     "release": "npm run check:release && tauri build",
+    "build:release": "npm run release",
     "dev:standard": "cross-env VITE_UIA_DIAGNOSTICS=false tauri dev",
     "dev:uia": "cross-env VITE_UIA_DIAGNOSTICS=true tauri dev --features uia-diagnostics"
   }

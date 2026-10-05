@@ -408,7 +408,7 @@ export default function App() {
     if (storageBusy.current || isWritingClipboard.current) return;
 
     requestConfirmation(
-      'Delete custom templates, favorites, saved theme, recovery files, and the current draft? Built-in templates remain. Proceed?',
+      'Delete custom templates, favorites, saved theme, local database data, and the current draft? Built-in templates remain. Proceed?',
       async () => {
         storageBusy.current = true;
         setIsSaving(true);
