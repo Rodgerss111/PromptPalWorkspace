@@ -46,8 +46,27 @@ export function registerGlobalShortcut(
   return registrationQueue;
 }
 
-export function clearShortcutCallback(callback: () => void): void {
+export function releaseGlobalShortcuts(): Promise<void> {
+  registrationQueue = registrationQueue.then(async () => {
+    const bindings = Array.from(activeBindings);
+    for (const binding of bindings) {
+      try {
+        await unregister(binding);
+      } catch {
+      } finally {
+        activeBindings.delete(binding);
+      }
+    }
+    return { success: true };
+  });
+
+  return registrationQueue.then(() => undefined);
+}
+
+export function clearShortcutCallback(callback: () => void): Promise<void> {
   if (latestTriggerCallback === callback) {
     latestTriggerCallback = null;
   }
+
+  return releaseGlobalShortcuts();
 }

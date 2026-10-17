@@ -26,6 +26,7 @@ pub fn run() {
         load_user_data,
         save_user_data,
         reset_storage,
+        restore_storage,
         capture::perform_target_probe,
     ]);
 
@@ -34,6 +35,7 @@ pub fn run() {
         load_user_data,
         save_user_data,
         reset_storage,
+        restore_storage,
     ]);
 
     builder
@@ -61,4 +63,11 @@ fn reset_storage(
     manager: tauri::State<'_, store::PersistenceManager>,
 ) -> Result<(), String> {
     manager.reset_to_factory().map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+fn restore_storage(
+    manager: tauri::State<'_, store::PersistenceManager>,
+) -> Result<(), String> {
+    manager.restore_backup().map_err(|error| error.to_string())
 }

@@ -2,14 +2,13 @@ import { TemplateBuilder, type BuilderSession } from './components/TemplateBuild
 import { useState, useRef, useCallback, useEffect, useMemo, useReducer } from 'react';
 import { PromptEditor } from './components/PromptEditor';
 import { TemplateLibrary } from './components/TemplateLibrary';
-import { starterTemplates } from './data/templates';
-import { loadUserData, saveUserDataSnapshot, resetStorageToDefaults } from './utils/store';
-import { clearShortcutCallback, registerGlobalShortcut } from './utils/shortcut';
+import { loadUserData, saveUserDataSnapshot, restoreBackup, resetStorageToDefaults } from './utils/store';
+import { clearShortcutCallback, registerGlobalShortcut, releaseGlobalShortcuts } from './utils/shortcut';
 import { requestVisibility } from './utils/window';
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
 import { getCurrentWindow } from '@tauri-apps/api/window';
-import type { Template, SessionState } from './types';
+import type { Template, SessionState, Preferences, StoreSnapshot } from './types';
 import './App.css';
 
 type ConfirmState = {
@@ -42,7 +41,7 @@ export type SessionAction =
   | { type: 'SET_COPY_FEEDBACK'; value: string }
   | { type: 'CLEAR' };
 
-interface WorkflowState {
+export interface WorkflowState {
   session: SessionState | null;
   manualInput: string;
   draftTemplate: Template | null;
@@ -51,7 +50,7 @@ interface WorkflowState {
   copyFeedback: string;
 }
 
-const initialWorkflowState: WorkflowState = {
+export const initialWorkflowState: WorkflowState = {
   session: null,
   manualInput: '',
   draftTemplate: null,
@@ -60,11 +59,13 @@ const initialWorkflowState: WorkflowState = {
   copyFeedback: '',
 };
 
-function reduceWorkflow(state: WorkflowState, action: SessionAction): WorkflowState {
+export function reduceWorkflow(state: WorkflowState, action: SessionAction): WorkflowState {
   switch (action.type) {
     case 'START_MANUAL':
+      if (state.session !== null) return state;
       return { ...state, session: action.session, manualInput: action.input };
     case 'UPDATE_INPUT':
+      if (state.session !== null) return state;
       return { ...state, manualInput: action.value };
     case 'UPDATE_EDITOR':
       return { ...state, draftTemplate: action.template };
@@ -93,9 +94,12 @@ export default function App() {
   const { session, manualInput, draftTemplate, draftVariables, builderSession, copyFeedback } = workflow;
   const sessionRef = useRef<SessionState | null>(null);
   
-  // In-Memory Library State
   const [customTemplates, setCustomTemplates] = useState<Template[]>([]);
+  const builtInTemplatesRef = useRef<Template[]>([]);
   const [favoriteIds, setFavoriteIds] = useState<string[]>([]);
+  const dataRevisionRef = useRef<number>(1);
+  const preferencesRef = useRef<Preferences | null>(null);
+
   const [isReadOnly, setIsReadOnly] = useState(false);
   const [initStatus, setInitStatus] = useState<'idle' | 'loading' | 'success' | 'error'>('loading');
   const [initError, setInitError] = useState<string | null>(null);
@@ -104,7 +108,6 @@ export default function App() {
   
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const storageBusy = useRef(false);
-  const isWritingClipboard = useRef(false);
 
   const [pendingAction, setPendingAction] = useState<'Prompt' | 'Original' | null>(null);
   const [confirmState, setConfirmState] = useState<ConfirmState | null>(null);
@@ -113,10 +116,17 @@ export default function App() {
   const feedbackTimer = useRef<number | null>(null);
   const isMounted = useRef<boolean>(true);
   const currentActivationId = useRef<number>(0);
+
   const dispatchWorkflow = useCallback((action: SessionAction) => {
+    if (action.type === 'CLEAR' && isWriting.current) {
+      setGlobalError('Please wait for the clipboard operation to finish before clearing.');
+      return;
+    }
+
     const nextState = reduceWorkflow(workflowRef.current, action);
     workflowRef.current = nextState;
     sessionRef.current = nextState.session;
+    
     if (action.type === 'CLEAR') {
       setGlobalError(null);
       setViewState('capture');
@@ -127,7 +137,7 @@ export default function App() {
     rawDispatchWorkflow(action);
   }, []);
 
-  const allTemplates = useMemo(() => [...starterTemplates, ...customTemplates], [customTemplates]);
+  const allTemplates = useMemo(() => [...builtInTemplatesRef.current, ...customTemplates], [customTemplates]);
 
   const requestConfirmation = useCallback((message: string, onConfirm: () => void) => {
     setConfirmState({ message, onConfirm });
@@ -137,19 +147,18 @@ export default function App() {
     let cancelled = false;
     void loadUserData().then(result => {
       if (cancelled) return;
-      const snapshot = (result as any)?.snapshot ?? (result as any) ?? {};
-      setCustomTemplates(snapshot.customTemplates ?? []);
-      setFavoriteIds(snapshot.favoriteIds ?? []);
-      setTheme(snapshot.theme ?? 'light');
-      setIsReadOnly(Boolean((result as any)?.isReadOnly));
-      setInitError((result as any)?.warning ?? null);
-      setGlobalError((result as any)?.warning ?? null);
-      setInitStatus('success');
-    }).catch(() => {
-      if (!cancelled) {
-        setTheme('light');
+      if (result.status === 'success') {
+        const snap = result.snapshot;
+        builtInTemplatesRef.current = snap.templates.filter(t => t.isBuiltIn);
+        setCustomTemplates(snap.templates.filter(t => !t.isBuiltIn));
+        setFavoriteIds(snap.preferences.favoriteTemplateIds);
+        preferencesRef.current = snap.preferences;
+        dataRevisionRef.current = snap.preferences.dataRevision;
+        setIsReadOnly(false);
+        setInitStatus('success');
+      } else {
         setIsReadOnly(true);
-        setInitError('Initialization failed.');
+        setInitError(result.warning);
         setInitStatus('error');
       }
     });
@@ -336,7 +345,7 @@ export default function App() {
   };
 
   const handleStartCapture = () => {
-    if (!manualInput.trim()) return; // Require text for session
+    if (!manualInput.trim()) return;
     invalidateFeedback(); 
     dispatchWorkflow({
       type: 'START_MANUAL',
@@ -365,30 +374,42 @@ export default function App() {
     setViewState('editor');
   };
 
-  const executePessimisticSave = async (newTemplates: Template[], newFavorites: string[], newTheme: 'dark' | 'light'): Promise<boolean> => {
-    if (isReadOnly || storageBusy.current) return false;
+  const executePessimisticSave = async (newTemplates: Template[], newFavorites: string[]): Promise<boolean> => {
+    if (isReadOnly || storageBusy.current || !preferencesRef.current) return false;
     storageBusy.current = true;
     setIsSaving(true);
     setGlobalError(null);
     
     try {
-      const result = await saveUserDataSnapshot({ customTemplates: newTemplates, favoriteIds: newFavorites, theme: newTheme });
+      const snapshot: StoreSnapshot = {
+        templates: [...builtInTemplatesRef.current, ...newTemplates],
+        preferences: {
+          ...preferencesRef.current,
+          favoriteTemplateIds: newFavorites,
+          dataRevision: dataRevisionRef.current
+        }
+      };
+
+      const result = await saveUserDataSnapshot(snapshot);
       if (result.success) {
         setCustomTemplates(newTemplates);
         setFavoriteIds(newFavorites);
-        setTheme(newTheme);
+        dataRevisionRef.current += 1; 
         return true;
       } else {
         if (result.fatal) {
           setIsReadOnly(true);
-          setGlobalError(`${result.error} Application is now locked in Read-Only mode.`);
+          setGlobalError(`Storage Locked [${result.code}]: ${result.error}`);
+        } else if (result.code === 'STALE_DATA') {
+          setGlobalError('Data was modified elsewhere. Please restart the app to sync.');
         } else {
           setGlobalError(result.error);
         }
         return false;
       }
     } catch (err: unknown) {
-      setGlobalError('An unexpected error occurred during save.');
+      setIsReadOnly(true);
+      setGlobalError('An unexpected error occurred during save. Storage locked.');
       return false;
     } finally {
       storageBusy.current = false;
@@ -401,38 +422,41 @@ export default function App() {
     const nextFavorites = favoriteIds.includes(id)
       ? favoriteIds.filter(favoriteId => favoriteId !== id)
       : [...favoriteIds, id];
-    void executePessimisticSave(customTemplates, nextFavorites, theme);
+    void executePessimisticSave(customTemplates, nextFavorites);
+  };
+
+  const handleRestoreBackup = async () => {
+    if (storageBusy.current) return;
+    requestConfirmation('Restore from the last known good backup? Unsaved current data will be lost.', async () => {
+      storageBusy.current = true;
+      setGlobalError("Restoring backup...");
+      const res = await restoreBackup();
+      if (res.success) {
+        await releaseGlobalShortcuts();
+        window.location.reload(); 
+      } else {
+        setGlobalError(`Restore failed [${res.code}]: ${res.error}`);
+        storageBusy.current = false;
+      }
+    });
   };
 
   const handleResetStorage = async () => {
-    if (storageBusy.current || isWritingClipboard.current) return;
+    if (storageBusy.current || isWriting.current) return;
 
     requestConfirmation(
-      'Delete custom templates, favorites, saved theme, local database data, and the current draft? Built-in templates remain. Proceed?',
+      'Delete all custom templates, favorites, settings, and the current draft? This will factory reset the application. Proceed?',
       async () => {
         storageBusy.current = true;
-        setIsSaving(true);
-        try {
-          const defaults = await resetStorageToDefaults();
-          setCustomTemplates(defaults.customTemplates);
-          setFavoriteIds(defaults.favoriteIds);
-          setTheme(defaults.theme);
-
-          dispatchWorkflow({ type: 'CLEAR' });
-          invalidateFeedback();
-
-          setIsReadOnly(false);
-          setInitStatus('success');
-          setInitError(null);
-          setGlobalError(null);
-          setViewState('capture');
-        } catch (err: unknown) {
-          setInitError(err instanceof Error ? err.message : 'Reset failed.');
-          setInitStatus('error');
-          setIsReadOnly(true);
-        } finally {
+        setGlobalError("Resetting storage to factory defaults...");
+        
+        const res = await resetStorageToDefaults();
+        if (res.success) {
+          await releaseGlobalShortcuts();
+          window.location.reload(); 
+        } else {
+          setGlobalError(`Factory reset failed [${res.code}]: ${res.error}`);
           storageBusy.current = false;
-          setIsSaving(false);
         }
       }
     );
@@ -445,7 +469,7 @@ export default function App() {
     requestConfirmation('Permanently delete this custom template? This action cannot be undone.', async () => {
       const updated = customTemplates.filter(t => t.id !== id);
       const updatedFavs = favoriteIds.filter(f => f !== id);
-      await executePessimisticSave(updated, updatedFavs, theme);
+      await executePessimisticSave(updated, updatedFavs);
     });
   };
 
@@ -456,7 +480,7 @@ export default function App() {
       ? customTemplates.map(t => t.id === finalizedTemplate.id ? finalizedTemplate : t)
       : [...customTemplates, finalizedTemplate];
       
-    const success = await executePessimisticSave(updatedTemplates, favoriteIds, theme);
+    const success = await executePessimisticSave(updatedTemplates, favoriteIds);
     if (success) {
       dispatchWorkflow({ type: 'SET_BUILDER_SESSION', builderSession: null });
       setViewState('library');
@@ -478,10 +502,8 @@ export default function App() {
 
   const handleWindowMouseDown = (event: React.MouseEvent<HTMLDivElement>) => {
     if (event.button !== 0) return;
-
     const target = event.target as HTMLElement;
     if (target.closest('button, input, textarea, select, a, [role="dialog"], [contenteditable="true"], [data-scrollable]')) return;
-
     void getCurrentWindow().startDragging();
   };
 
@@ -502,13 +524,25 @@ export default function App() {
           {theme === 'dark' ? 'Light Mode' : 'Dark Mode'}
         </button>
       )}
+      
       {(initStatus !== 'success' || initError || globalError) && (
         <div
           className={globalError === 'Please enter instructions to build a prompt.' ? 'status-region status-region--validation' : 'status-region'}
           role="status"
           aria-live="polite"
         >
-          {initError || globalError || (initStatus === 'loading' ? 'Loading templates…' : null)}
+          <div>{globalError || initError || (initStatus === 'loading' ? 'Loading templates…' : null)}</div>
+          
+          {isReadOnly && (
+            <div style={{ marginTop: '12px', display: 'flex', gap: '8px' }}>
+              <button className="primary" onClick={handleRestoreBackup} disabled={storageBusy.current}>
+                Restore Backup
+              </button>
+              <button className="secondary" onClick={handleResetStorage} disabled={storageBusy.current}>
+                Factory Reset
+              </button>
+            </div>
+          )}
         </div>
       )}
       

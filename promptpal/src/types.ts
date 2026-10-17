@@ -19,11 +19,28 @@ export interface Variable {
   defaultValue: string;
 }
 
+export interface Preferences {
+  favoriteTemplateIds: string[];
+  shortcut: string;
+  launchAtStartup: boolean;
+  iconPosition: number[] | null;
+  iconVisible: boolean;
+  schemaVersion: number;
+  dataRevision: number;
+}
+
+export interface StoreSnapshot {
+  templates: Template[];
+  preferences: Preferences;
+}
+
 export interface SessionState {
   originalText: string; 
   targetIdentity: string | null; 
   selectionDetails: string | null;
   captureStatus: 'idle' | 'captured' | 'failed' | 'manual';
+  manualInput: string;
+  editorValues: Record<string, string>;
 }
 
 export interface EditorState {

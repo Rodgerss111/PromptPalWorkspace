@@ -15,6 +15,10 @@ export function validateTemplateBlueprint(template: unknown): { success: true } 
   }
   
   const t = template as Template;
+
+  if (!Array.isArray(t.variables)) {
+    return { success: false, error: "Template variables must be an array.", code: "INVALID_TEMPLATE_VARIABLES" };
+  }
   
   if (!t.id || !t.name) {
     return { success: false, error: "Template missing id or name.", code: "MISSING_METADATA" };
@@ -22,10 +26,6 @@ export function validateTemplateBlueprint(template: unknown): { success: true } 
   if (typeof t.contextText !== 'string' || typeof t.taskText !== 'string' || typeof t.formatText !== 'string') {
     return { success: false, error: "Template sections must be strings.", code: "INVALID_TEMPLATE_SECTIONS" };
   }
-  if (!Array.isArray(t.variables)) {
-    return { success: false, error: "Template variables must be an array.", code: "INVALID_TEMPLATE_VARIABLES" };
-  }
-
   const declaredNames = new Set<string>();
   const requiredVars = new Set<string>();
   let hasRequiredUserInput = false;
@@ -52,15 +52,19 @@ export function validateTemplateBlueprint(template: unknown): { success: true } 
     return { success: false, error: "'user_input' must be declared and required.", code: "MISSING_USER_INPUT_DECLARATION" };
   }
 
+  const sections = [t.contextText, t.taskText, t.formatText];
+  for (const section of sections) {
+    const strippedText = section.replace(PLACEHOLDER_REGEX, '');
+    if (strippedText.includes('{{') || strippedText.includes('}}')) {
+      return { success: false, error: "Malformed brace syntax detected.", code: "MALFORMED_SYNTAX" };
+    }
+  }
+
   if (!/\{\{\s*user_input\s*\}\}/.test(t.taskText)) {
     return { success: false, error: "{{user_input}} must be inside Task section.", code: "USER_INPUT_NOT_IN_TASK" };
   }
 
-  const combinedText = `${t.contextText} ${t.taskText} ${t.formatText}`;
-  const strippedText = combinedText.replace(PLACEHOLDER_REGEX, '');
-  if (strippedText.includes('{{') || strippedText.includes('}}')) {
-    return { success: false, error: "Malformed brace syntax detected.", code: "MALFORMED_SYNTAX" };
-  }
+  const combinedText = sections.join(' ');
 
   const usedVars = new Set<string>();
   let match;
@@ -98,7 +102,12 @@ export function assemblePrompt(template: Template, suppliedValues: unknown): Bui
   const resolvedValues = new Map<string, string>();
 
   for (const v of template.variables) {
-    const rawValue = hasOwn(valuesDict, v.name) ? valuesDict[v.name] : undefined;
+    const hasSuppliedValue = hasOwn(valuesDict, v.name);
+    if (v.name === 'user_input' && (!hasSuppliedValue || valuesDict[v.name] === undefined)) {
+      return { success: false, error: "Missing required explicit input for: user_input", code: "MISSING_USER_INPUT_VALUE" };
+    }
+
+    const rawValue = hasSuppliedValue ? valuesDict[v.name] : undefined;
     const finalValue = rawValue !== undefined ? rawValue : v.defaultValue;
 
     if (typeof finalValue !== 'string') {
