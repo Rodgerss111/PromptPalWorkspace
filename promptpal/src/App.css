@@ -78,6 +78,7 @@ html {
   background-color: var(--bg-color);
   border-radius: 20px;
   border: 0;
+  border-bottom: 1px solid var(--border-color);
   outline: 0;
   box-shadow: none;
   background-clip: padding-box;
@@ -265,4 +266,43 @@ pre, code { overflow-wrap: anywhere; white-space: pre-wrap; }
 
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation: none !important; transition: none !important; }
+}
+
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--border-color) var(--bg-secondary);
+}
+
+*::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+
+*::-webkit-scrollbar-track {
+  background: var(--bg-secondary);
+}
+
+*::-webkit-scrollbar-thumb {
+  background: var(--border-color);
+  border-radius: 8px;
+  border: 2px solid var(--bg-secondary);
+}
+
+.library-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  flex-wrap: wrap;
+  padding: 24px 20px 16px;
+  border-bottom: 1px solid var(--border-color);
+}
+
+.library-header > div {
+  flex-wrap: wrap;
+}
+
+.library-title {
+  margin: 0;
+  font-size: 20px;
 }

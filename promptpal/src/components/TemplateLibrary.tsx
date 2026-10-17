@@ -4,6 +4,7 @@ import type { Template } from '../types';
 interface TemplateLibraryProps {
   templates: Template[];
   favoriteIds: string[];
+  onHome: () => void;
   onSelectTemplate: (template: Template) => void;
   onToggleFavorite: (id: string) => void;
   onEditTemplate: (template: Template, mode: 'edit' | 'duplicate') => void;
@@ -14,6 +15,7 @@ interface TemplateLibraryProps {
 export function TemplateLibrary({
   templates,
   favoriteIds,
+  onHome,
   onSelectTemplate,
   onToggleFavorite,
   onEditTemplate,
@@ -64,8 +66,6 @@ export function TemplateLibrary({
 
   return (
     <div style={{ padding: '0 20px' }}>
-      <h2 style={{ marginTop: 0 }}>Template Library</h2>
-      
       <input
         type="text"
         placeholder="Search templates..."
@@ -82,6 +82,9 @@ export function TemplateLibrary({
           aria-pressed={activeView === 'All'}
         >
           All
+        </button>
+        <button type="button" className="secondary" onClick={onHome}>
+          Home
         </button>
         <button 
           type="button"

@@ -511,6 +511,12 @@ export default function App() {
     setViewState('library');
   }, [invalidateFeedback]);
 
+  const goHome = useCallback(() => {
+    invalidateFeedback();
+    dispatchWorkflow({ type: 'CLEAR' });
+    setTimeout(() => inputRef.current?.focus(), 0);
+  }, [dispatchWorkflow, invalidateFeedback]);
+
   const clearEverything = () => {
     void handleResetStorage();
     dispatchWorkflow({ type: 'CLEAR' });
@@ -618,7 +624,8 @@ export default function App() {
 
         {viewState === 'library' && (
           <div style={{ maxWidth: '600px', margin: '0 auto' }}>
-             <div style={{ padding: '24px 20px 0', marginBottom: '16px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+             <div className="library-header">
+               <h2 className="library-title">Template Library</h2>
                 <div style={{ display: 'flex', gap: '12px', alignItems: 'center' }}>
                   <button className="primary" onClick={() => { dispatchWorkflow({ type: 'SET_BUILDER_SESSION', builderSession: { mode: 'create', template: null } }); setViewState('builder'); }} disabled={isSaving || isReadOnly}>
                     Create Template
@@ -632,6 +639,7 @@ export default function App() {
              <TemplateLibrary 
                 templates={allTemplates}
                 favoriteIds={favoriteIds}
+               onHome={goHome}
                 onSelectTemplate={handleSelectTemplate}
                 onToggleFavorite={isReadOnly || isSaving ? () => {} : toggleFavorite}
                 onEditTemplate={(t, mode) => { dispatchWorkflow({ type: 'SET_BUILDER_SESSION', builderSession: { mode, template: t } }); setViewState('builder'); }}
