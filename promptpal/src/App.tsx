@@ -120,7 +120,7 @@ export default function App() {
   const dispatchWorkflow = useCallback((action: SessionAction) => {
     if (action.type === 'CLEAR' && isWriting.current) {
       setGlobalError('Please wait for the clipboard operation to finish before clearing.');
-      return;
+      return; 
     }
 
     const nextState = reduceWorkflow(workflowRef.current, action);
@@ -330,8 +330,10 @@ export default function App() {
         dispatchWorkflow({ type: 'SET_COPY_FEEDBACK', value: 'Copy failed. Please select the text and copy manually.' });
       }
     } finally {
+      // Unconditionally releases the lock whether the OS succeeds or throws an error
+      isWriting.current = false;
+      
       if (isMounted.current) {
-        isWriting.current = false;
         setPendingAction(null);
         if (capturedDraftId === draftId.current) {
           feedbackTimer.current = window.setTimeout(() => {
@@ -349,7 +351,14 @@ export default function App() {
     invalidateFeedback(); 
     dispatchWorkflow({
       type: 'START_MANUAL',
-      session: { originalText: manualInput, targetIdentity: null, selectionDetails: null, captureStatus: 'manual' },
+      session: {
+        originalText: manualInput,
+        targetIdentity: null,
+        selectionDetails: null,
+        captureStatus: 'manual',
+        manualInput,
+        editorValues: {},
+      },
       input: manualInput,
     });
     setViewState('library');
@@ -442,11 +451,20 @@ export default function App() {
   };
 
   const handleResetStorage = async () => {
-    if (storageBusy.current || isWriting.current) return;
-
+    // Initial check before opening the dialog
+    if (storageBusy.current || isWriting.current) {
+      if (isWriting.current) setGlobalError('Please wait for the clipboard operation to finish.');
+      return;
+    }
     requestConfirmation(
       'Delete all custom templates, favorites, settings, and the current draft? This will factory reset the application. Proceed?',
       async () => {
+        // FR08: Re-verify locks inside the callback to prevent race conditions while the modal was open
+        if (storageBusy.current || isWriting.current) {
+          setGlobalError('Please wait for the current operation to finish.');
+          return;
+        }
+        
         storageBusy.current = true;
         setGlobalError("Resetting storage to factory defaults...");
         

@@ -15,7 +15,7 @@ test('reduceWorkflow ignores START_MANUAL and UPDATE_INPUT when a session is act
   // 1. Establish an active session
   const action1: SessionAction = { 
     type: 'START_MANUAL', 
-    session: { originalText: 'First Input', targetIdentity: null, selectionDetails: null, captureStatus: 'manual' }, 
+    session: { originalText: 'First Input', targetIdentity: null, selectionDetails: null, captureStatus: 'manual', manualInput: 'First Input', editorValues: {} }, 
     input: 'First Input' 
   };
   const stateAfterStart = reduceWorkflow(initialState, action1);
@@ -26,7 +26,7 @@ test('reduceWorkflow ignores START_MANUAL and UPDATE_INPUT when a session is act
   // 2. Simulate rapid rogue START_MANUAL (e.g., shortcut mashed 3 times)
   const rogueStartAction: SessionAction = { 
     type: 'START_MANUAL', 
-    session: { originalText: 'Rogue Input', targetIdentity: null, selectionDetails: null, captureStatus: 'manual' }, 
+    session: { originalText: 'Rogue Input', targetIdentity: null, selectionDetails: null, captureStatus: 'manual', manualInput: 'Rogue Input', editorValues: {} }, 
     input: 'Rogue Input' 
   };
   const stateAfterRogueStart = reduceWorkflow(stateAfterStart, rogueStartAction);

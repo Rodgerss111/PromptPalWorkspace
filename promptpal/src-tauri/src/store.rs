@@ -6,7 +6,7 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread::{self, JoinHandle};
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use std::io;
 
 #[cfg(test)]
@@ -281,16 +281,49 @@ impl PersistenceManager {
     }
 
     fn initialize_connection(path: &Path) -> Result<Connection, StoreError> {
+        let log_path = path.with_extension("sqlite.diag.log");
+        let timestamp = SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_millis();
+        
+        // Mark the start of a new connection attempt and clear stale data for this run
+        let _ = fs::write(&log_path, format!("--- RUN {} START ---\n", timestamp));
+
+        let log_err = |phase: &str, e: &rusqlite::Error| {
+            let (primary, extended) = match e {
+                rusqlite::Error::SqliteFailure(ffi_err, _) => {
+                    (format!("{:?}", ffi_err.code), ffi_err.extended_code)
+                }
+                _ => ("NonSqliteError".to_string(), 0),
+            };
+            if let Ok(mut file) = std::fs::OpenOptions::new().append(true).open(&log_path) {
+                use std::io::Write;
+                let _ = writeln!(file, "Phase: {}\nPrimary: {}\nExtended: {}\n--- RUN END (FAILURE) ---\n", phase, primary, extended);
+            }
+        };
+
+        let init_error = |phase: &str, e: &rusqlite::Error| {
+            log_err(phase, e);
+            let message = e.to_string().to_lowercase();
+            if message.contains("locked") || message.contains("busy") {
+                StoreError::AccessDenied
+            } else {
+                StoreError::DatabaseCorrupted
+            }
+        };
+
         let conn = Connection::open(path).map_err(|e| {
-            if e.to_string().contains("database is locked") { StoreError::AccessDenied } else { StoreError::DatabaseCorrupted }
+            init_error("Open_Connection", &e)
         })?;
 
-        conn.execute_batch(
-            "PRAGMA journal_mode = WAL;
-             PRAGMA synchronous = NORMAL;
-             PRAGMA foreign_keys = ON;
-             
-             CREATE TABLE IF NOT EXISTS preferences (
+        conn.busy_timeout(Duration::from_secs(5)).map_err(|e| init_error("Busy_Timeout", &e))?;
+
+        let _: String = conn.query_row("PRAGMA journal_mode = WAL;", [], |row| row.get(0)).map_err(|e| init_error("Pragma_JournalMode", &e))?;
+
+        conn.execute("PRAGMA synchronous = NORMAL;", []).map_err(|e| init_error("Pragma_Synchronous", &e))?;
+
+        conn.execute("PRAGMA foreign_keys = ON;", []).map_err(|e| init_error("Pragma_ForeignKeys", &e))?;
+
+        conn.execute(
+            "CREATE TABLE IF NOT EXISTS preferences (
                  id INTEGER PRIMARY KEY CHECK (id = 1),
                  favorite_template_ids TEXT NOT NULL,
                  shortcut TEXT NOT NULL,
@@ -299,9 +332,11 @@ impl PersistenceManager {
                  icon_visible INTEGER NOT NULL,
                  schema_version INTEGER NOT NULL,
                  data_revision INTEGER NOT NULL
-             );
+             );", []
+           ).map_err(|e| init_error("Schema_Preferences", &e))?;
 
-             CREATE TABLE IF NOT EXISTS templates (
+        conn.execute(
+            "CREATE TABLE IF NOT EXISTS templates (
                  id TEXT PRIMARY KEY,
                  schema_version INTEGER NOT NULL,
                  name TEXT NOT NULL,
@@ -313,19 +348,30 @@ impl PersistenceManager {
                  is_built_in INTEGER NOT NULL CHECK (is_built_in IN (0, 1)),
                  created_at INTEGER NOT NULL,
                  updated_at INTEGER NOT NULL
-             );"
-        ).map_err(|_| StoreError::DatabaseCorrupted)?;
-
-        let epoch_rev = SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_secs() as u32;
+             );", []
+           ).map_err(|e| init_error("Schema_Templates", &e))?;
 
         conn.execute(
             "INSERT OR IGNORE INTO preferences (id, favorite_template_ids, shortcut, launch_at_startup, icon_position, icon_visible, schema_version, data_revision) 
-             VALUES (1, '[]', 'Ctrl+Shift+Space', 0, NULL, 1, 1, ?1)",
-            [epoch_rev]
-        ).map_err(|_| StoreError::DatabaseCorrupted)?;
+             VALUES (1, '[]', 'Ctrl+Shift+Space', 0, NULL, 1, 1, 1)", []
+           ).map_err(|e| init_error("Seed_Insert", &e))?;
 
-        let check: String = conn.query_row("PRAGMA quick_check", [], |row| row.get(0)).map_err(|_| StoreError::DatabaseCorrupted)?;
-        if check.to_lowercase() != "ok" { return Err(StoreError::DatabaseCorrupted); }
+        let check: String = conn.query_row("PRAGMA quick_check", [], |row| row.get(0))
+            .map_err(|e| init_error("Query_QuickCheck", &e))?;
+            
+        if check.to_lowercase() != "ok" { 
+            if let Ok(mut file) = std::fs::OpenOptions::new().append(true).open(&log_path) {
+                use std::io::Write;
+                let _ = writeln!(file, "Phase: Eval_QuickCheck\nPrimary: NON_OK\nExtended: 0\n--- RUN END (FAILURE) ---\n");
+            }
+            return Err(StoreError::DatabaseCorrupted); 
+        }
+
+        // Successfully cleared all initialization and recovery gates
+        if let Ok(mut file) = std::fs::OpenOptions::new().append(true).open(&log_path) {
+            use std::io::Write;
+            let _ = writeln!(file, "--- RUN END (SUCCESS) ---\n");
+        }
 
         Ok(conn)
     }
@@ -352,15 +398,16 @@ impl PersistenceManager {
                 row.get::<_, String>(0)?, row.get::<_, String>(1)?, row.get::<_, i32>(2)?,
                 row.get::<_, Option<String>>(3)?, row.get::<_, i32>(4)?, row.get::<_, u32>(5)?, row.get::<_, u32>(6)?
             ))
-        ).map_err(|_| StoreError::DatabaseCorrupted)?;
+        ).map_err(|e| StoreError::Fatal(format!("Pref query failed: {}", e)))?;
 
         let icon_position = match pref_tuple.3 {
-            Some(s) => Some(serde_json::from_str(&s).map_err(|_| StoreError::DatabaseCorrupted)?),
+            Some(s) if s.trim() == "null" => None,
+            Some(s) => Some(serde_json::from_str(&s).map_err(|e| StoreError::Fatal(format!("Parse icon_position failed: {}", e)))?),
             None => None,
         };
 
         let preferences = Preferences {
-            favorite_template_ids: serde_json::from_str(&pref_tuple.0).map_err(|_| StoreError::DatabaseCorrupted)?,
+            favorite_template_ids: serde_json::from_str(&pref_tuple.0).map_err(|e| StoreError::Fatal(format!("Parse favorites failed: {}", e)))?,
             shortcut: pref_tuple.1,
             launch_at_startup: pref_tuple.2 != 0,
             icon_position,
@@ -369,21 +416,24 @@ impl PersistenceManager {
             data_revision: pref_tuple.6,
         };
 
-        let mut tmpl_stmt = conn.prepare("SELECT id, schema_version, name, category, context_text, task_text, format_text, variables, is_built_in, created_at, updated_at FROM templates WHERE is_built_in = 0").map_err(|_| StoreError::DatabaseCorrupted)?;
+        let mut tmpl_stmt = conn.prepare("SELECT id, schema_version, name, category, context_text, task_text, format_text, variables, is_built_in, created_at, updated_at FROM templates WHERE is_built_in = 0")
+            .map_err(|e| StoreError::Fatal(format!("Template prepare failed: {}", e)))?;
+            
         let custom_rows_iter = tmpl_stmt.query_map([], |row| {
             Ok((
                 row.get::<_, String>(0)?, row.get::<_, u32>(1)?, row.get::<_, String>(2)?, row.get::<_, String>(3)?,
                 row.get::<_, String>(4)?, row.get::<_, String>(5)?, row.get::<_, String>(6)?, row.get::<_, String>(7)?,
                 row.get::<_, i32>(8)?, row.get::<_, u64>(9)?, row.get::<_, u64>(10)?
             ))
-        }).map_err(|_| StoreError::DatabaseCorrupted)?;
+        }).map_err(|e| StoreError::Fatal(format!("Template query_map failed: {}", e)))?;
 
         let mut templates = get_canonical_builtins();
         for res in custom_rows_iter {
-            let row = res.map_err(|_| StoreError::DatabaseCorrupted)?;
+            let row = res.map_err(|e| StoreError::Fatal(format!("Template row read failed: {}", e)))?;
+            let template_id = row.0.clone();
             templates.push(Template {
                 id: row.0, schema_version: row.1, name: row.2, category: row.3, context_text: row.4, task_text: row.5, format_text: row.6,
-                variables: serde_json::from_str(&row.7).map_err(|_| StoreError::DatabaseCorrupted)?,
+                variables: serde_json::from_str(&row.7).map_err(|e| StoreError::Fatal(format!("Parse variables failed on template '{}': {}", template_id, e)))?,
                 is_built_in: row.8 != 0, created_at: row.9, updated_at: row.10,
             });
         }

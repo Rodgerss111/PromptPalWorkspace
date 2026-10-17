@@ -3,7 +3,7 @@ import { SessionState } from '../types';
 
 export type SessionAction = 
   | { type: 'START_MANUAL'; payload: SessionState }
-  | { type: 'UPDATE_EDITOR'; payload: Partial<SessionState['editorValues']> }
+  | { type: 'UPDATE_EDITOR'; payload: Record<string, string> }
   | { type: 'SET_MANUAL_INPUT'; payload: string }
   | { type: 'CLEAR' };
 
