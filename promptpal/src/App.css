@@ -78,7 +78,7 @@ html {
   background-color: var(--bg-color);
   border-radius: 20px;
   border: 0;
-  border-bottom: 1px solid var(--border-color);
+  border-bottom: 0;
   outline: 0;
   box-shadow: none;
   background-clip: padding-box;
@@ -295,7 +295,8 @@ pre, code { overflow-wrap: anywhere; white-space: pre-wrap; }
   gap: 16px;
   flex-wrap: wrap;
   padding: 24px 20px 16px;
-  border-bottom: 1px solid var(--border-color);
+  width: 100%;
+  box-sizing: border-box;
 }
 
 .library-header > div {
@@ -305,4 +306,16 @@ pre, code { overflow-wrap: anywhere; white-space: pre-wrap; }
 .library-title {
   margin: 0;
   font-size: 20px;
+}
+
+.bottom-safe-bar {
+  height: 12px;
+  flex: 0 0 12px;
+  background: var(--bg-color);
+}
+
+[data-scrollable] {
+  scroll-behavior: smooth;
+  overscroll-behavior-y: contain;
+  -webkit-overflow-scrolling: touch;
 }

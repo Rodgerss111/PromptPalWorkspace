@@ -117,44 +117,46 @@ pub struct Preferences {
 fn get_canonical_builtins() -> Vec<Template> {
     vec![
         Template {
-            id: "builtin-learn-fundamentals".into(), schema_version: 1, name: "Learn fundamentals".into(), category: "Learning".into(),
-            context_text: "I am a beginner studying this topic and want to understand the fundamentals.".into(),
-            task_text: "Explain the question or topic: {{user_input}}".into(), format_text: "Up to 5 bullets and one analogy.".into(),
+            id: "builtin-quick-learning".into(), schema_version: 1, name: "Quick Learning".into(), category: "Learning".into(),
+            context_text: "I am a beginner learning about a new topic. I want to understand the core idea without unnecessary details or jargon.".into(),
+            task_text: "Explain the most important concept regarding: {{user_input}}\nInclude one relatable analogy that makes the idea easy to understand. Focus on understanding, not memorization.".into(),
+            format_text: "Exactly 3 sentences. Sentence 1: What it is. Sentence 2: How it works, using an analogy. Sentence 3: Why it matters or when it is useful. Use simple words and no additional text.".into(),
             variables: vec![Variable { name: "user_input".into(), label: "Topic".into(), required: true, default_value: "".into() }],
             is_built_in: true, created_at: 0, updated_at: 0,
         },
         Template {
-            id: "builtin-summarize-material".into(), schema_version: 1, name: "Summarize material".into(), category: "Analysis".into(),
-            context_text: "I need a concise summary of the provided text.".into(),
-            task_text: "Summarize this source text: {{source_text}}\nFocus on: {{user_input}}".into(), format_text: "Main idea and 5 key points.".into(),
+            id: "builtin-token-efficiency".into(), schema_version: 1, name: "Token Efficiency".into(), category: "Productivity".into(),
+            context_text: "I have limited AI credits. I need high-quality results while minimizing unnecessary token usage, explanations, and repeated work.".into(),
+            task_text: "Complete the following task: {{user_input}}\nUse the most direct approach that achieves the required quality. Remove redundant steps, avoid repeating known information, and skip unnecessary analysis or refinements. Do not sacrifice essential reasoning, correctness, safety, or verification. Ask questions only when missing information materially affects the result.".into(),
+            format_text: "Provide only the necessary output, key findings, and next action. Use concise headings or bullets when helpful. Do not include generic introductions, repeated summaries, or unnecessary conclusions.".into(),
+            variables: vec![Variable { name: "user_input".into(), label: "Task".into(), required: true, default_value: "".into() }],
+            is_built_in: true, created_at: 0, updated_at: 0,
+        },
+        Template {
+            id: "builtin-code-explainer".into(), schema_version: 1, name: "Code Explainer".into(), category: "Coding".into(),
+            context_text: "I am learning programming and need to understand this code without being overwhelmed. I want both a technically accurate explanation and a beginner-friendly interpretation.".into(),
+            task_text: "Explain the purpose of the following code or file:\n\n{{user_input}}\n\nCover what it does, how the main components work together, the important execution flow, and any critical edge cases or limitations. Use a simple analogy to explain the hardest technical concept. Focus on understanding rather than explaining every line individually.".into(),
+            format_text: "1. Purpose: One or two sentences.\n2. How it works: Numbered steps in execution order.\n3. Key components: Compact table of important functions, variables, or modules and their roles.\n4. Beginner analogy: Explain the central technical idea using a relatable example.\n5. Important details: Essential dependencies, errors, edge cases, or limitations.\nUse simple language, preserve technical accuracy, and keep the explanation proportional to the code's complexity.".into(),
+            variables: vec![Variable { name: "user_input".into(), label: "Code or File".into(), required: true, default_value: "".into() }],
+            is_built_in: true, created_at: 0, updated_at: 0,
+        },
+        Template {
+            id: "builtin-natural-paragraph".into(), schema_version: 1, name: "Natural Paragraph Writer".into(), category: "Writing".into(),
+            context_text: "I need to write or improve content. The writing should sound natural, authentic, and appropriate for the situation.".into(),
+            task_text: "Write or improve the following content: {{user_input}}\nAudience or Purpose: {{audience}}\nUse simple, easy-to-understand words. Preserve the original meaning and important details. Remove redundancy, exaggerated claims, generic expressions, and unnecessarily formal language. Do not invent facts or experiences.".into(),
+            format_text: "Write in paragraph form, not bullet points. Use a natural flow, clear sentences, and an appropriate tone. Keep it as concise as the purpose allows while preserving the necessary information.".into(),
             variables: vec![
-                Variable { name: "source_text".into(), label: "Source Text".into(), required: true, default_value: "".into() },
-                Variable { name: "user_input".into(), label: "Focus".into(), required: true, default_value: "".into() }
+                Variable { name: "user_input".into(), label: "Topic or Draft".into(), required: true, default_value: "".into() },
+                Variable { name: "audience".into(), label: "Audience/Purpose".into(), required: true, default_value: "".into() }
             ],
             is_built_in: true, created_at: 0, updated_at: 0,
         },
         Template {
-            id: "builtin-compare-concepts".into(), schema_version: 1, name: "Compare concepts".into(), category: "Analysis".into(),
-            context_text: "I want to understand the differences and similarities between concepts.".into(),
-            task_text: "Compare the following concepts: {{user_input}}. Please ask for missing items if context is needed.".into(), format_text: "Short table and brief takeaway.".into(),
-            variables: vec![Variable { name: "user_input".into(), label: "Concepts".into(), required: true, default_value: "".into() }],
-            is_built_in: true, created_at: 0, updated_at: 0,
-        },
-        Template {
-            id: "builtin-practice-questions".into(), schema_version: 1, name: "Practice questions".into(), category: "Study".into(),
-            context_text: "I am preparing for an assessment and need to test my knowledge.".into(),
-            task_text: "Create practice questions from this topic or notes: {{user_input}}".into(), format_text: "5 questions; answers in a separate section at the bottom.".into(),
-            variables: vec![Variable { name: "user_input".into(), label: "Topic or Notes".into(), required: true, default_value: "".into() }],
-            is_built_in: true, created_at: 0, updated_at: 0,
-        },
-        Template {
-            id: "builtin-improve-writing".into(), schema_version: 1, name: "Improve my writing".into(), category: "Review".into(),
-            context_text: "I want to improve the clarity and flow of my writing.".into(),
-            task_text: "Give feedback on this draft: {{rough_draft}}\nMy goal is: {{user_input}}".into(), format_text: "Revised text and 3 explained changes.".into(),
-            variables: vec![
-                Variable { name: "rough_draft".into(), label: "Rough Draft".into(), required: true, default_value: "".into() },
-                Variable { name: "user_input".into(), label: "Goal".into(), required: true, default_value: "".into() }
-            ],
+            id: "builtin-decision-accelerator".into(), schema_version: 1, name: "Decision Accelerator".into(), category: "Analysis".into(),
+            context_text: "I need to make progress on a goal. I want a sound decision without chasing perfection or spending time on issues that can safely be addressed later.".into(),
+            task_text: "Evaluate the situation critically for this goal or decision: {{user_input}}\nIdentify the most important risks, distinguish must-fix problems from minor improvements, and recommend the simplest approach that meets the objective. Consider trade-offs, but do not analyze alternatives that would not materially change the decision. State any critical uncertainty.".into(),
+            format_text: "- Decision: Your recommendation in one sentence.\n- Why: Up to 3 concise points.\n- Must fix now: Only issues that materially threaten success.\n- Can wait: Noncritical improvements worth deferring.\n- Next action: One specific action to take immediately.\nKeep the response short. Do not pursue perfection when the current approach is sufficiently reliable and meets the requirements.".into(),
+            variables: vec![Variable { name: "user_input".into(), label: "Goal or Situation".into(), required: true, default_value: "".into() }],
             is_built_in: true, created_at: 0, updated_at: 0,
         }
     ]

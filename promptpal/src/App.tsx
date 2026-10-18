@@ -517,13 +517,6 @@ export default function App() {
     setTimeout(() => inputRef.current?.focus(), 0);
   }, [dispatchWorkflow, invalidateFeedback]);
 
-  const clearEverything = () => {
-    void handleResetStorage();
-    dispatchWorkflow({ type: 'CLEAR' });
-    invalidateFeedback(); 
-    setTimeout(() => inputRef.current?.focus(), 0);
-  };
-
   const handleWindowMouseDown = (event: React.MouseEvent<HTMLDivElement>) => {
     if (event.button !== 0) return;
     const target = event.target as HTMLElement;
@@ -538,7 +531,7 @@ export default function App() {
         onMouseDown={handleWindowMouseDown}
         style={{ height: '12px', flexShrink: 0, cursor: 'move' }}
       />
-      {viewState === 'capture' && (
+      {(viewState === 'capture' || viewState === 'library') && (
         <button
           className="secondary theme-toggle"
           type="button"
@@ -627,10 +620,10 @@ export default function App() {
              <div className="library-header">
                <h2 className="library-title">Template Library</h2>
                 <div style={{ display: 'flex', gap: '12px', alignItems: 'center' }}>
+                  <button className="secondary" onClick={goHome}>Home</button>
                   <button className="primary" onClick={() => { dispatchWorkflow({ type: 'SET_BUILDER_SESSION', builderSession: { mode: 'create', template: null } }); setViewState('builder'); }} disabled={isSaving || isReadOnly}>
                     Create Template
                   </button>
-                  <button className="secondary" onClick={clearEverything}>Start Fresh</button>
                   <button className="secondary" style={{ color: 'var(--danger-text)', borderColor: 'var(--danger-text)', opacity: isSaving ? 0.5 : 1 }} disabled={isSaving || pendingAction !== null} onClick={handleResetStorage}>
                     Clear All Data
                   </button>
@@ -639,7 +632,6 @@ export default function App() {
              <TemplateLibrary 
                 templates={allTemplates}
                 favoriteIds={favoriteIds}
-               onHome={goHome}
                 onSelectTemplate={handleSelectTemplate}
                 onToggleFavorite={isReadOnly || isSaving ? () => {} : toggleFavorite}
                 onEditTemplate={(t, mode) => { dispatchWorkflow({ type: 'SET_BUILDER_SESSION', builderSession: { mode, template: t } }); setViewState('builder'); }}
@@ -678,6 +670,7 @@ export default function App() {
           </div>
         )}
       </div>
+      <div className="bottom-safe-bar" aria-hidden="true" />
     </div>
   );
 }
