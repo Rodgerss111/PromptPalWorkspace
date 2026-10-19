@@ -15,47 +15,59 @@
 }
 
 :root, .light-theme {
-  /* Main Backgrounds - Crisp white canvas with soft gray sections */
-  --bg-color: #FFFFFF;
-  --bg-secondary: #F5F5F7;
+  /* Main Backgrounds - Soft gray canvas with crisp foreground sections */
+  --bg-color: #F5F5F7;          /* Apple's signature 'Athens Gray' web canvas */
+  --bg-secondary: #FFFFFF;    /* Lifted foreground containers to segment content smoothly */
   
-  /* Typography - Sharp charcoal text hierarchy */
-  --text-primary: #1D1D1F;
-  --text-secondary: #6E6E73;
+  /* Typography - Premium soft charcoal hierarchy */
+  --text-primary: #1D1D1F;    /* Apple's standard primary text 'Shark' */
+  --text-secondary: #6E6E73;  /* Apple's standard secondary gray text */
   
-  /* UI Borders & Rules - Extremely faint lines */
-  --border-color: #D2D2D7;
+  /* UI Borders & Rules - Subtle separators */
+  --border-color: #D1D1D6;    /* Apple system light separator gray (softer than #D2D2D7) */
   
-  /* Interactive Elements - True SF blue links and states */
-  --accent-blue: #0071E3;
-  --accent-hover: #0077ED;
+  /* Interactive Elements - Official SF Blue styling */
+  --accent-blue: #0066CC;     /* Official Apple web interactive blue */
+  --accent-hover: #0077ED;    /* Slightly brighter hover state for responsive micro-interactions */
   
-  /* System Messages - Apple SF Red for errors */
-  --danger-text: #DE3618;
-  --favorite-color: #6E6E73;
-  --favorite-active-color: #B7791F;
+  /* System Messages & Icons - Official system colors */
+  --danger-text: #FF3B30;     /* Apple SF System Red for clean, eye-catching errors */
+  --favorite-color: #8E8E93;  /* System gray for inactive favorite states */
+  --favorite-active-color: #FF9500; /* Apple System Gold/Orange for glowing active states */
+
+  /* PromptPal Custom Active Pill State */
+  --hover-pill-bg: #F2F2F7;     /* Subtle hover shift */
+  --active-pill-bg: #FFFFFF;    /* Distinct grey to stand out from the #F5F5F7 background */
+  --active-pill-border: #D1D1D6;/* Smooth, crisp outline */
+  --active-pill-text: #1D1D1F;
 }
 
 .dark-theme {
-  /* Main Backgrounds - Pure black with dark gray panels */
-  --bg-color: #000000;
-  --bg-secondary: #1D1D1F;
+  /* Main Backgrounds - Deep charcoal base with elevated content panels */
+  --bg-color: #1C1C1E;          /* Apple's official System Background (Base) */
+  --bg-secondary: #2C2C2E;    /* Apple's System Background (Secondary) for container cards */
   
-  /* Typography - Crisp off-white and muted reading text */
-  --text-primary: #F5F5F7;
-  --text-secondary: #86868B;
+  /* Typography - Calibrated premium readability */
+  --text-primary: #FFFFFF;    /* Pure white is optimal against deep charcoal */
+  --text-secondary: #8E8E93;  /* Apple System Gray for balanced reading hierarchy */
   
-  /* UI Borders & Rules - Low-contrast separator lines */
-  --border-color: #424245;
+  /* UI Borders & Rules - Transparent or dark system dividers */
+  --border-color: #38383A;    /* Apple's official System Opaque Separator */
   
-  /* Interactive Elements - High-contrast neon blue for dark interfaces */
-  --accent-blue: #2997FF;
-  --accent-hover: #51A8FF;
+  /* Interactive Elements - Calibrated Dark Mode Blue */
+  --accent-blue: #0A84FF;     /* Apple's official dynamic System Blue for dark interfaces */
+  --accent-hover: #409CFF;    /* Responsive micro-interaction hover state */
   
-  /* System Messages - Vibrant system red for dark backgrounds */
-  --danger-text: #FF453A;
-  --favorite-color: #C8D0DC;
-  --favorite-active-color: #FFD166;
+  /* System Messages & Icons - High-contrast accessible alerts */
+  --danger-text: #FF453A;     /* Already perfect! Apple's standard Dark Mode System Red */
+  --favorite-color: #8E8E93;  /* Inactive elements share the consistent secondary gray */
+  --favorite-active-color: #FF9F0A; /* Apple's official dynamic Dark Mode System Orange */
+
+  /* PromptPal Custom Active Pill State */
+  --hover-pill-bg: #3A3A3C;     /* Subtle hover shift */
+  --active-pill-bg: #48484A;    /* Soothing soft dark-grey to prevent eye strain */
+  --active-pill-border: #636366;/* Smooth, crisp outline */
+  --active-pill-text: #F5F5F7;
 }
 
 body {
@@ -184,9 +196,28 @@ button.secondary {
   color: var(--text-primary);
   border: 1px solid var(--border-color);
   padding: 10px 18px;
-  border-radius: 20px;
+  border-radius: 99px; /* Perfect pill shape */
   font-weight: 500;
   cursor: pointer;
+  text-decoration: none !important; /* Forces underline removal */
+}
+
+/* Custom PromptPal Hover - Smooth Apple-like subtle shift */
+button.secondary:hover {
+  background-color: var(--hover-pill-bg);
+}
+
+/* Custom PromptPal Active State - Smooth outline and distinct fill */
+button.secondary[aria-pressed="true"] {
+  background-color: var(--active-pill-bg);
+  color: var(--active-pill-text);
+  border-color: var(--active-pill-border); 
+  box-shadow: none; 
+}
+
+/* Ensure hover STILL triggers a color change when the button is already active */
+button.secondary[aria-pressed="true"]:hover {
+  background-color: var(--active-pill-border);
 }
 
 .theme-toggle {
@@ -206,7 +237,6 @@ button.secondary {
   justify-content: flex-end;
 }
 
-button[aria-pressed="true"] { text-decoration: underline; text-underline-offset: 4px; }
 pre, code { overflow-wrap: anywhere; white-space: pre-wrap; }
 .action-row { display: flex; flex-wrap: wrap; gap: 12px; }
 
@@ -318,4 +348,94 @@ pre, code { overflow-wrap: anywhere; white-space: pre-wrap; }
   scroll-behavior: smooth;
   overscroll-behavior-y: contain;
   -webkit-overflow-scrolling: touch;
+}
+/* ==========================================================================
+   Premium Smooth Scrolling, Scrollbars & Theme Transitions
+   ========================================================================== */
+
+/* 1. Prevent textareas from bouncing the window, but allow native scrolling elsewhere */
+textarea {
+  overscroll-behavior-y: contain;
+}
+
+/* 2. Global smooth scrolling */
+* {
+  scroll-behavior: smooth;
+}
+
+/* 3. Custom sleek scrollbar for Windows WebView2 */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+  margin: 4px;
+}
+
+::-webkit-scrollbar-thumb {
+  background-color: var(--border-color);
+  border-radius: 10px;
+  border: 2px solid transparent;
+  background-clip: padding-box;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background-color: var(--text-secondary);
+}
+
+::-webkit-scrollbar-thumb:active {
+  background-color: var(--accent-blue);
+}
+
+/* 4. Smooth Theme Transitions (Optimized for WebView2 Memory) */
+body, 
+header, 
+footer, 
+nav, 
+section, 
+div, 
+p, 
+span, 
+h1, h2, h3, h4, h5, h6, 
+a, 
+button, 
+input,
+textarea {
+  transition: 
+    background-color 0.4s cubic-bezier(0.25, 1, 0.5, 1),
+    color 0.3s cubic-bezier(0.25, 1, 0.5, 1),
+    border-color 0.4s cubic-bezier(0.25, 1, 0.5, 1);
+}
+/* Premium Horizontal Scrollbar */
+[data-scrollable] {
+  -ms-overflow-style: auto; 
+  scrollbar-width: thin;    
+  padding-bottom: 8px !important; 
+}
+
+[data-scrollable]::-webkit-scrollbar {
+  display: block; 
+  height: 6px; 
+}
+
+[data-scrollable]::-webkit-scrollbar-track {
+  background: transparent;
+  margin: 0 2px;
+}
+
+[data-scrollable]::-webkit-scrollbar-thumb {
+  background-color: var(--border-color);
+  border-radius: 10px;
+}
+
+[data-scrollable]::-webkit-scrollbar-thumb:hover {
+  background-color: var(--text-secondary);
+}
+
+/* Apply specific sizing for scrollable category pills */
+[data-scrollable] button.secondary {
+  padding: 6px 16px;
+  white-space: nowrap;
 }

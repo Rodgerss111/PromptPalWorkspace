@@ -24,7 +24,6 @@ export function TemplateLibrary({
   const [activeView, setActiveView] = useState<'All' | 'Favorites'>('All');
   const [activeCategoryFilter, setActiveCategoryFilter] = useState<string | null>(null);
 
-  // Derive unique categories dynamically, maintaining first-encountered display casing
   const categories = useMemo(() => {
     const map = new Map<string, string>();
     templates.forEach(t => {
@@ -37,14 +36,11 @@ export function TemplateLibrary({
 
   const filteredTemplates = useMemo(() => {
     return templates.filter(t => {
-      // 1. View Filter
       if (activeView === 'Favorites' && !favoriteIds.includes(t.id)) return false;
       
-      // 2. Category Filter (Normalized check)
       const rawCat = t.category?.trim() || 'Uncategorized';
       if (activeCategoryFilter && rawCat.toLowerCase() !== activeCategoryFilter.toLowerCase()) return false;
       
-      // 3. Search Filter
       if (searchQuery) {
         const query = searchQuery.toLowerCase();
         return t.name.toLowerCase().includes(query) || rawCat.toLowerCase().includes(query);
@@ -54,7 +50,6 @@ export function TemplateLibrary({
     });
   }, [templates, activeView, activeCategoryFilter, searchQuery, favoriteIds]);
 
-  // If a user deletes the last template in a category while viewing it, this resets the filter.
   React.useEffect(() => {
     if (activeCategoryFilter) {
       const exists = categories.some(c => c.toLowerCase() === activeCategoryFilter.toLowerCase());

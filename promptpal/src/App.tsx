@@ -8,7 +8,7 @@ import { requestVisibility } from './utils/window';
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
 import { getCurrentWindow } from '@tauri-apps/api/window';
-import type { Template, SessionState, Preferences, StoreSnapshot } from './types';
+import type { Template, SessionState, Preferences, StoreSnapshot, Variable } from './types';
 import './App.css';
 
 type ConfirmState = {
@@ -39,6 +39,7 @@ export type SessionAction =
   | { type: 'UPDATE_VARIABLES'; values: Record<string, string> }
   | { type: 'SET_BUILDER_SESSION'; builderSession: BuilderSession | null }
   | { type: 'SET_COPY_FEEDBACK'; value: string }
+  | { type: 'APPEND_TO_DRAFT'; section: 'contextText' | 'taskText' | 'formatText'; textToAppend: string; newVariables: Variable[] }
   | { type: 'CLEAR' };
 
 export interface WorkflowState {
@@ -75,6 +76,28 @@ export function reduceWorkflow(state: WorkflowState, action: SessionAction): Wor
       return { ...state, builderSession: action.builderSession };
     case 'SET_COPY_FEEDBACK':
       return { ...state, copyFeedback: action.value };
+    case 'APPEND_TO_DRAFT': {
+      if (!state.draftTemplate) return state;
+      const { section, textToAppend, newVariables } = action;
+      
+      const currentText = state.draftTemplate[section];
+      const newText = currentText.trim() ? `${currentText}\n\n${textToAppend}` : textToAppend;
+      
+      const updatedTemplate = {
+        ...state.draftTemplate,
+        [section]: newText,
+        variables: [...state.draftTemplate.variables, ...newVariables]
+      };
+
+      const newDraftVariables = { ...state.draftVariables };
+      newVariables.forEach(v => {
+        if (!(v.name in newDraftVariables) && v.name !== 'user_input') {
+          newDraftVariables[v.name] = v.defaultValue;
+        }
+      });
+
+      return { ...state, draftTemplate: updatedTemplate, draftVariables: newDraftVariables };
+    }
     case 'CLEAR':
       return initialWorkflowState;
     default: {
@@ -330,7 +353,6 @@ export default function App() {
         dispatchWorkflow({ type: 'SET_COPY_FEEDBACK', value: 'Copy failed. Please select the text and copy manually.' });
       }
     } finally {
-      // Unconditionally releases the lock whether the OS succeeds or throws an error
       isWriting.current = false;
       
       if (isMounted.current) {
@@ -451,7 +473,6 @@ export default function App() {
   };
 
   const handleResetStorage = async () => {
-    // Initial check before opening the dialog
     if (storageBusy.current || isWriting.current) {
       if (isWriting.current) setGlobalError('Please wait for the clipboard operation to finish.');
       return;
@@ -459,7 +480,6 @@ export default function App() {
     requestConfirmation(
       'Delete all custom templates, favorites, settings, and the current draft? This will factory reset the application. Proceed?',
       async () => {
-        // FR08: Re-verify locks inside the callback to prevent race conditions while the modal was open
         if (storageBusy.current || isWriting.current) {
           setGlobalError('Please wait for the current operation to finish.');
           return;
@@ -538,7 +558,7 @@ export default function App() {
           aria-pressed={theme === 'dark'}
           onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')}
         >
-          {theme === 'dark' ? 'Light Mode' : 'Dark Mode'}
+          {theme === 'light' ? 'Dark Mode' : 'Light Mode'}
         </button>
       )}
       
@@ -612,6 +632,11 @@ export default function App() {
             copyFeedback={copyFeedback}
             executeCopy={executeCopy}
             invalidateFeedback={invalidateFeedback}
+            allTemplates={allTemplates}
+            onAppendToDraft={(section, textToAppend, newVariables) => {
+              dispatchWorkflow({ type: 'APPEND_TO_DRAFT', section, textToAppend, newVariables });
+              invalidateFeedback();
+            }}
           />
         )}
 
@@ -642,33 +667,41 @@ export default function App() {
         )}
 
         {viewState === 'capture' && (
-          <div style={{ maxWidth: '500px', margin: '20px auto', padding: '0 20px' }}>
-            <h2>Create your prompt</h2>
-            <label htmlFor="manual-capture" style={{ display: 'block', marginBottom: '8px' }}>
-              Paste your text, notes, or instruction:
-            </label>
-            <textarea 
-              ref={inputRef}
-              id="manual-capture"
-              rows={4} 
-              value={manualInput} 
-              onChange={(e) => {
-                const value = e.target.value;
-                dispatchWorkflow({ type: 'UPDATE_INPUT', value });
-                if (value.trim()) setGlobalError(null);
-              }}
-              placeholder="e.g., Summarize this article for me..."
-            />
-            <div className="action-row" style={{ justifyContent: 'flex-start', marginTop: '12px' }}>
-              <button className="primary" onClick={handleStartCapture}>
-                Build Prompt
-              </button>
-              <button className="secondary" onClick={() => { setGlobalError(null); setViewState('library'); }}>
-                Manage Templates
-              </button>
-            </div>
-          </div>
-        )}
+  <div style={{ maxWidth: '500px', margin: '24px auto', padding: '0 20px' }}>
+    <h2 style={{ fontSize: '24px', fontWeight: 600, letterSpacing: '-0.02em', margin: '0 0 6px' }}>
+      Clear prompts, less effort
+    </h2>
+    <p style={{ color: 'var(--text-secondary)', fontSize: '13px', lineHeight: '1.5', letterSpacing: '0.01em', margin: '0 0 14px 0', maxWidth: '440px' }}>
+      Turn your idea into a prompt that fits your goal. Choose a template, refine it, and copy it to your AI tool.
+    </p>
+
+    <label htmlFor="manual-capture" style={{ display: 'block', marginBottom: '8px', fontSize: '14px', fontWeight: 500 }}>
+      What are you working on?
+    </label>
+    <textarea
+      ref={inputRef}
+      id="manual-capture"
+      rows={4}
+      value={manualInput}
+      onChange={(e) => {
+        const value = e.target.value;
+        dispatchWorkflow({ type: 'UPDATE_INPUT', value });
+        if (value.trim()) setGlobalError(null);
+      }}
+      placeholder="A question, draft, code, or notes..."
+    />
+
+    <div className="action-row" style={{ justifyContent: 'flex-start', marginTop: '12px' }}>
+      <button className="primary" onClick={handleStartCapture}>Build prompt</button>
+      <button className="secondary" onClick={() => {
+        setGlobalError(null);
+        setViewState('library');
+      }}>
+        View templates
+      </button>
+    </div>
+  </div>
+)}
       </div>
       <div className="bottom-safe-bar" aria-hidden="true" />
     </div>

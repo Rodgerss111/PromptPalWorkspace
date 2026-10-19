@@ -1,14 +1,13 @@
-import type { Template } from '../types';
+import type { Template, Variable } from '../types';
 
 export type BuilderResult =
   | { success: true; prompt: string }
   | { success: false; error: string; code: string; details?: string };
 
 const IDENTIFIER_REGEX = /^[a-zA-Z_][a-zA-Z0-9_]*$/;
-const PLACEHOLDER_REGEX = /\{\{([^}]+)\}\}/g;
+export const PLACEHOLDER_REGEX = /\{\{([^}]+)\}\}/g;
 const hasOwn = (obj: object, key: string) => Object.prototype.hasOwnProperty.call(obj, key);
 
-// 1. Definition Validation (Blueprint Contract)
 export function validateTemplateBlueprint(template: unknown): { success: true } | { success: false; error: string; code: string; details?: string } {
   if (!template || typeof template !== 'object' || Array.isArray(template)) {
     return { success: false, error: "Invalid template object.", code: "INVALID_TEMPLATE" };
@@ -86,9 +85,7 @@ export function validateTemplateBlueprint(template: unknown): { success: true } 
   return { success: true };
 }
 
-// 2. Value Validation (Assembly Contract)
 export function assemblePrompt(template: Template, suppliedValues: unknown): BuilderResult {
-  // Enforce blueprint integrity before processing values
   const blueprintCheck = validateTemplateBlueprint(template);
   if (!blueprintCheck.success) {
     return blueprintCheck;
@@ -134,4 +131,56 @@ export function assemblePrompt(template: Template, suppliedValues: unknown): Bui
     success: true, 
     prompt: `Context: ${contextParsed}\n\nTask: ${taskParsed}\n\nFormat: ${formatParsed}` 
   };
+}
+
+export function getAppendPayload(
+  draftTemplate: Template, 
+  sourceTemplate: Template, 
+  section: 'contextText' | 'taskText' | 'formatText'
+): { success: true; textToAppend: string; newVariables: Variable[] } | { success: false; error: string } {
+  const textToAppend = sourceTemplate[section].trim();
+  if (!textToAppend) {
+    return { success: false, error: "The selected section is empty in the source template." };
+  }
+
+  // Strictly reject malformed syntax before parsing valid variables
+  const strippedText = textToAppend.replace(PLACEHOLDER_REGEX, '');
+  if (strippedText.includes('{{') || strippedText.includes('}}')) {
+    return { success: false, error: "Malformed brace syntax detected in the source text. Cannot append." };
+  }
+
+  const usedVars = new Set<string>();
+  let match;
+  PLACEHOLDER_REGEX.lastIndex = 0;
+  while ((match = PLACEHOLDER_REGEX.exec(textToAppend)) !== null) {
+    usedVars.add(match[1].trim());
+  }
+
+  const newVariables: Variable[] = [];
+
+  for (const varName of usedVars) {
+    if (varName === 'user_input') continue;
+
+    const sourceVar = sourceTemplate.variables.find(v => v.name === varName);
+    const draftVar = draftTemplate.variables.find(v => v.name === varName);
+
+    if (!sourceVar) {
+      return { success: false, error: `Variable '${varName}' used in text but not defined in source template.` };
+    }
+
+    if (draftVar) {
+      if (draftVar.label !== sourceVar.label || 
+          draftVar.required !== sourceVar.required || 
+          draftVar.defaultValue !== sourceVar.defaultValue) {
+        return { 
+          success: false, 
+          error: `Variable conflict: '${varName}' is already in your draft with different settings (Label: "${draftVar.label}", Required: ${draftVar.required}, Default: "${draftVar.defaultValue}"). Cannot append without corrupting the draft.` 
+        };
+      }
+    } else {
+      newVariables.push(sourceVar);
+    }
+  }
+
+  return { success: true, textToAppend, newVariables };
 }
