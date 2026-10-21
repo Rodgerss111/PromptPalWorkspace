@@ -130,7 +130,14 @@ unsafe fn verify_target_process(pid: u32) -> Result<String, ProbeStatus> {
 }
 
 #[tauri::command]
-pub async fn perform_target_probe() -> TargetProbeResult {
+pub async fn perform_target_probe(window: tauri::Window) -> TargetProbeResult {
+    if window.label() != "main" {
+        return TargetProbeResult {
+            status: ProbeStatus::UnauthorizedProcess,
+            ..Default::default()
+        };
+    }
+
     if PROBE_ACTIVE
         .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
         .is_err()

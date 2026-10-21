@@ -4,7 +4,7 @@ import { PromptEditor } from './components/PromptEditor';
 import { TemplateLibrary } from './components/TemplateLibrary';
 import { loadUserData, saveUserDataSnapshot, restoreBackup, resetStorageToDefaults } from './utils/store';
 import { clearShortcutCallback, registerGlobalShortcut, releaseGlobalShortcuts } from './utils/shortcut';
-import { requestVisibility } from './utils/window';
+import { requestVisibility, toggleVisibility } from './utils/window';
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
 import { getCurrentWindow } from '@tauri-apps/api/window';
@@ -29,6 +29,8 @@ type TargetProbeResult = {
   has_value_pattern: boolean | null;
   has_text_pattern: boolean | null;
 };
+
+type MessageType = 'error' | 'warning' | 'info';
 
 const ENABLE_UIA_DIAGNOSTICS = import.meta.env.DEV && import.meta.env.VITE_UIA_DIAGNOSTICS === 'true';
 
@@ -126,7 +128,13 @@ export default function App() {
   const [isReadOnly, setIsReadOnly] = useState(false);
   const [initStatus, setInitStatus] = useState<'idle' | 'loading' | 'success' | 'error'>('loading');
   const [initError, setInitError] = useState<string | null>(null);
-  const [globalError, setGlobalError] = useState<string | null>(null);
+  
+  const [appMessage, setAppMessage] = useState<{ text: string, type: MessageType } | null>(null);
+  const clearMessage = useCallback(() => setAppMessage(null), []);
+  const showError = useCallback((text: string) => setAppMessage({ text, type: 'error' }), []);
+  const showWarning = useCallback((text: string) => setAppMessage({ text, type: 'warning' }), []);
+  const showInfo = useCallback((text: string) => setAppMessage({ text, type: 'info' }), []);
+
   const [isSaving, setIsSaving] = useState(false);
   
   const inputRef = useRef<HTMLTextAreaElement>(null);
@@ -142,7 +150,7 @@ export default function App() {
 
   const dispatchWorkflow = useCallback((action: SessionAction) => {
     if (action.type === 'CLEAR' && isWriting.current) {
-      setGlobalError('Please wait for the clipboard operation to finish before clearing.');
+      showWarning('Please wait for the clipboard operation to finish before clearing.');
       return; 
     }
 
@@ -151,14 +159,14 @@ export default function App() {
     sessionRef.current = nextState.session;
     
     if (action.type === 'CLEAR') {
-      setGlobalError(null);
+      clearMessage();
       setViewState('capture');
       setPendingAction(null);
       draftId.current += 1;
       if (feedbackTimer.current) window.clearTimeout(feedbackTimer.current);
     }
     rawDispatchWorkflow(action);
-  }, []);
+  }, [clearMessage, showWarning]);
 
   const allTemplates = useMemo(() => [...builtInTemplatesRef.current, ...customTemplates], [customTemplates]);
 
@@ -166,25 +174,48 @@ export default function App() {
     setConfirmState({ message, onConfirm });
   }, []);
 
+  // FIXED: Ensure the modal consumes Escape keys without hiding the app window
+  useEffect(() => {
+    const handleConfirmEscape = (e: KeyboardEvent) => {
+      if (e.key === 'Escape' && confirmState) {
+        e.preventDefault(); 
+        e.stopPropagation();
+        setConfirmState(null);
+      }
+    };
+    window.addEventListener('keydown', handleConfirmEscape, true);
+    return () => window.removeEventListener('keydown', handleConfirmEscape, true);
+  }, [confirmState]);
+
   useEffect(() => {
     let cancelled = false;
-    void loadUserData().then(result => {
-      if (cancelled) return;
-      if (result.status === 'success') {
-        const snap = result.snapshot;
-        builtInTemplatesRef.current = snap.templates.filter(t => t.isBuiltIn);
-        setCustomTemplates(snap.templates.filter(t => !t.isBuiltIn));
-        setFavoriteIds(snap.preferences.favoriteTemplateIds);
-        preferencesRef.current = snap.preferences;
-        dataRevisionRef.current = snap.preferences.dataRevision;
-        setIsReadOnly(false);
-        setInitStatus('success');
-      } else {
+    
+    loadUserData()
+      .then(result => {
+        if (cancelled) return;
+        if (result.status === 'success') {
+          const snap = result.snapshot;
+          builtInTemplatesRef.current = snap.templates.filter(t => t.isBuiltIn);
+          setCustomTemplates(snap.templates.filter(t => !t.isBuiltIn));
+          setFavoriteIds(snap.preferences.favoriteTemplateIds);
+          preferencesRef.current = snap.preferences;
+          dataRevisionRef.current = snap.preferences.dataRevision;
+          setIsReadOnly(false);
+          setInitStatus('success');
+        } else {
+          setIsReadOnly(true);
+          setInitError(result.warning);
+          setInitStatus('error');
+        }
+      })
+      .catch(err => {
+        if (cancelled) return;
+        console.error("Storage load failed:", err);
         setIsReadOnly(true);
-        setInitError(result.warning);
+        setInitError(`Storage Error: ${String(err)}`);
         setInitStatus('error');
-      }
-    });
+      });
+      
     return () => { cancelled = true; };
   }, []);
 
@@ -201,31 +232,29 @@ export default function App() {
   }, []);
 
   useEffect(() => {
-    let isMounted = true;
-    let unlistenSingleInstance: (() => void) | undefined;
-
     const handleShortcutTriggered = async () => {
       const activationId = ++currentActivationId.current;
-      const isActive = () => isMounted && currentActivationId.current === activationId;
+      const isActive = () => isMounted.current && currentActivationId.current === activationId;
 
       if (sessionRef.current !== null) {
         requestVisibility(true).then(() => {
           if (isActive()) {
-            setGlobalError('Active draft exists. Clear your session to capture new text.');
+            showWarning('Active draft exists. Navigate to the Home screen and clear your session to create a new one.');
             setFocusRequested(false);
           }
         }).catch(() => {
-          if (isActive()) setGlobalError('Failed to coordinate window visibility.');
+          if (isActive()) showError('Failed to coordinate window visibility.');
         });
         return;
       }
 
       setViewState('capture');
-      setGlobalError(null);
+      clearMessage();
+      
       requestVisibility(true).then(() => {
-        if (isActive()) setFocusRequested(true);
+        if (isActive() && sessionRef.current === null) setFocusRequested(true);
       }).catch(() => {
-        if (isActive()) setGlobalError('Failed to coordinate window visibility.');
+        if (isActive()) showError('Failed to coordinate window visibility.');
       });
 
       if (ENABLE_UIA_DIAGNOSTICS) {
@@ -250,14 +279,14 @@ export default function App() {
 
           if (isActive()) {
             if (sessionRef.current !== null) {
-              setGlobalError('Finish or clear this draft before starting another capture.');
+              showWarning('Active draft exists. Navigate to the Home screen and clear your session to create a new one.');
               return;
             }
 
             if (probe.status === 'Complete' || probe.status === 'Partial') {
               console.log(`[UIA Probe] Browser: ${probe.process_path} | Class: ${probe.class_name} | Role: ${probe.aria_role}`);
             } else {
-              setGlobalError(`Target probe unavailable: ${probe.status}`);
+              showWarning(`Target probe unavailable: ${probe.status}`);
             }
           }
         } catch (err) {
@@ -269,11 +298,11 @@ export default function App() {
     };
 
     registerGlobalShortcut(handleShortcutTriggered, 'CommandOrControl+Shift+Space').then(result => {
-      if (isMounted) {
+      if (isMounted.current) {
         if (result.fatal) {
-          setGlobalError(`Shortcut Error: ${result.error}`);
+          showError(`Shortcut Error: ${result.error}`);
         } else if (!result.success) {
-          setGlobalError(`Shortcut Warning: ${result.error}`);
+          showWarning(`Shortcut Warning: ${result.error}`);
         }
       }
     });
@@ -283,7 +312,7 @@ export default function App() {
         currentActivationId.current++;
         setFocusRequested(false);
         try {
-          await getCurrentWindow().hide();
+          await requestVisibility(false);
         } catch (err) {
           console.warn('Failed to hide window:', err);
         }
@@ -292,34 +321,65 @@ export default function App() {
 
     window.addEventListener('keydown', handleGlobalKeyDown);
 
-    void listen('single-instance-summon', () => {
-      if (!isMounted) return;
+    const setupSingleInstance = async () => {
+      return await listen('single-instance-summon', () => {
+        if (!isMounted.current) return;
 
-      const activationId = ++currentActivationId.current;
-      const isActive = () => isMounted && currentActivationId.current === activationId;
+        const activationId = ++currentActivationId.current;
+        const isActive = () => isMounted.current && currentActivationId.current === activationId;
 
-      requestVisibility(true).then(() => {
-        if (isActive()) setFocusRequested(true);
-      }).catch(() => {
-        if (isActive()) setGlobalError('Failed to coordinate single-instance visibility.');
+        requestVisibility(true).then(() => {
+          if (isActive() && sessionRef.current === null) setFocusRequested(true);
+        }).catch(() => {
+          if (isActive()) showError('Failed to coordinate single-instance visibility.');
+        });
       });
-    }).then(unlisten => {
-      if (!isMounted) {
-        unlisten();
-      } else {
-        unlistenSingleInstance = unlisten;
-      }
-    }).catch(() => {
-      if (isMounted) setGlobalError('Failed to register single-instance listener.');
-    });
+    };
+    const unlistenSingleInstancePromise = setupSingleInstance();
+
+    const setupCompanionListener = async () => {
+      return await listen('summon-promptpal', () => {
+        if (!isMounted.current) return;
+
+        const activationId = ++currentActivationId.current;
+        const isActive = () => isMounted.current && currentActivationId.current === activationId;
+
+        toggleVisibility().then((isNowVisible) => {
+          if (isActive() && isNowVisible && sessionRef.current === null) {
+            setFocusRequested(true);
+          }
+        }).catch(() => {
+          if (isActive()) showError('Failed to toggle companion visibility.');
+        });
+      });
+    };
+    const unlistenCompanionPromise = setupCompanionListener();
+
+    const setupCloseInterceptor = async () => {
+      const mainWindow = getCurrentWindow();
+      return await mainWindow.onCloseRequested((event) => {
+        event.preventDefault(); 
+        void requestVisibility(false);
+      });
+    };
+    const unlistenClosePromise = setupCloseInterceptor();
+
+    const setupTrayListener = async () => {
+      return await listen('tray-toggle', () => {
+        void toggleVisibility();
+      });
+    };
+    const unlistenTrayPromise = setupTrayListener();
 
     return () => {
-      isMounted = false;
       window.removeEventListener('keydown', handleGlobalKeyDown);
       clearShortcutCallback(handleShortcutTriggered);
-      if (unlistenSingleInstance) unlistenSingleInstance();
+      unlistenSingleInstancePromise.then(unlisten => unlisten());
+      unlistenCompanionPromise.then(unlisten => unlisten());
+      unlistenClosePromise.then(unlisten => unlisten());
+      unlistenTrayPromise.then(unlisten => unlisten());
     };
-  }, []);
+  }, [clearMessage, showError, showWarning]);
 
   useEffect(() => {
     if (focusRequested && viewState === 'capture' && inputRef.current) {
@@ -388,7 +448,7 @@ export default function App() {
 
   const handleSelectTemplate = (template: Template) => {
     if (!session) {
-      setGlobalError('Please enter instructions to build a prompt.');
+      showWarning('Please enter instructions to build a prompt.');
       setViewState('capture');
       setTimeout(() => inputRef.current?.focus(), 0);
       return;
@@ -409,7 +469,7 @@ export default function App() {
     if (isReadOnly || storageBusy.current || !preferencesRef.current) return false;
     storageBusy.current = true;
     setIsSaving(true);
-    setGlobalError(null);
+    clearMessage();
     
     try {
       const snapshot: StoreSnapshot = {
@@ -430,17 +490,17 @@ export default function App() {
       } else {
         if (result.fatal) {
           setIsReadOnly(true);
-          setGlobalError(`Storage Locked [${result.code}]: ${result.error}`);
+          showError(`Storage Locked [${result.code}]: ${result.error}`);
         } else if (result.code === 'STALE_DATA') {
-          setGlobalError('Data was modified elsewhere. Please restart the app to sync.');
+          showError('Data was modified elsewhere. Please restart the app to sync.');
         } else {
-          setGlobalError(result.error);
+          showError(result.error);
         }
         return false;
       }
     } catch (err: unknown) {
       setIsReadOnly(true);
-      setGlobalError('An unexpected error occurred during save. Storage locked.');
+      showError('An unexpected error occurred during save. Storage locked.');
       return false;
     } finally {
       storageBusy.current = false;
@@ -460,13 +520,13 @@ export default function App() {
     if (storageBusy.current) return;
     requestConfirmation('Restore from the last known good backup? Unsaved current data will be lost.', async () => {
       storageBusy.current = true;
-      setGlobalError("Restoring backup...");
+      showInfo("Restoring backup...");
       const res = await restoreBackup();
       if (res.success) {
         await releaseGlobalShortcuts();
         window.location.reload(); 
       } else {
-        setGlobalError(`Restore failed [${res.code}]: ${res.error}`);
+        showError(`Restore failed [${res.code}]: ${res.error}`);
         storageBusy.current = false;
       }
     });
@@ -474,26 +534,26 @@ export default function App() {
 
   const handleResetStorage = async () => {
     if (storageBusy.current || isWriting.current) {
-      if (isWriting.current) setGlobalError('Please wait for the clipboard operation to finish.');
+      if (isWriting.current) showWarning('Please wait for the clipboard operation to finish.');
       return;
     }
     requestConfirmation(
       'Delete all custom templates, favorites, settings, and the current draft? This will factory reset the application. Proceed?',
       async () => {
         if (storageBusy.current || isWriting.current) {
-          setGlobalError('Please wait for the current operation to finish.');
+          showWarning('Please wait for the current operation to finish.');
           return;
         }
         
         storageBusy.current = true;
-        setGlobalError("Resetting storage to factory defaults...");
+        showInfo("Resetting storage to factory defaults...");
         
         const res = await resetStorageToDefaults();
         if (res.success) {
           await releaseGlobalShortcuts();
           window.location.reload(); 
         } else {
-          setGlobalError(`Factory reset failed [${res.code}]: ${res.error}`);
+          showError(`Factory reset failed [${res.code}]: ${res.error}`);
           storageBusy.current = false;
         }
       }
@@ -526,10 +586,11 @@ export default function App() {
     return success;
   };
 
-  const goBackToLibrary = useCallback(() => {
+ const goBackToLibrary = useCallback(() => {
+    clearMessage(); // Dismisses any stuck warnings when clicking Back
     invalidateFeedback(); 
     setViewState('library');
-  }, [invalidateFeedback]);
+  }, [clearMessage, invalidateFeedback]);
 
   const goHome = useCallback(() => {
     invalidateFeedback();
@@ -544,13 +605,160 @@ export default function App() {
     void getCurrentWindow().startDragging();
   };
 
+  // FIXED: AppMessage (runtime errors) now take priority over initialization errors
+  // Resolve which message to show in the floating oval
+  let floatingMessage = null;
+  if (appMessage) {
+    floatingMessage = appMessage;
+  } else if (initStatus === 'loading') {
+    floatingMessage = { text: 'Loading templates…', type: 'info' as MessageType };
+  } else if (initError) {
+    floatingMessage = { text: initError, type: 'error' as MessageType };
+  } else if (isReadOnly) {
+    // Fallback if isReadOnly is true but previous errors were cleared
+    floatingMessage = { text: 'Storage is locked. Please restore or reset data.', type: 'error' as MessageType };
+  }
+
+  const getMessageStyles = (type: MessageType, isDark: boolean) => {
+    if (type === 'warning') {
+      return isDark
+        ? { bg: 'rgba(255, 152, 0, 0.2)', text: '#ffb74d', border: 'rgba(255, 152, 0, 0.5)' }
+        : { bg: '#fff7ed', text: '#c2410c', border: '#fdba74' };
+    }
+    if (type === 'error') {
+      return isDark
+        ? { bg: 'rgba(244, 67, 54, 0.2)', text: '#ef5350', border: 'rgba(244, 67, 54, 0.5)' }
+        : { bg: '#fef2f2', text: '#b91c1c', border: '#fca5a5' };
+    }
+    return isDark
+      ? { bg: 'rgba(33, 150, 243, 0.2)', text: '#64b5f6', border: 'rgba(33, 150, 243, 0.5)' }
+      : { bg: '#f0f9ff', text: '#0369a1', border: '#7dd3fc' };
+  };
+
+  const msgStyles = floatingMessage ? getMessageStyles(floatingMessage.type, theme === 'dark') : null;
+
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', height: '100vh' }}>
+    <div style={{ display: 'flex', flexDirection: 'column', height: '100vh', position: 'relative' }}>
+      
+      {/* Dynamic Floating Notification Oval */}
+      {floatingMessage && msgStyles && (
+        <div
+          style={{
+            position: 'fixed',
+            top: '32px',
+            left: '50%',
+            transform: 'translateX(-50%)',
+            zIndex: 9999,
+            backgroundColor: msgStyles.bg,
+            color: msgStyles.text,
+            border: `1px solid ${msgStyles.border}`,
+            padding: '12px 32px',
+            borderRadius: '9999px',
+            boxShadow: '0 10px 25px -5px rgba(0, 0, 0, 0.2), 0 8px 10px -6px rgba(0, 0, 0, 0.1)',
+            display: 'flex',
+            flexDirection: 'column',
+            alignItems: 'center',
+            justifyContent: 'center',
+            textAlign: 'center',
+            width: 'max-content',
+            maxWidth: '90vw',
+            backdropFilter: 'blur(8px)',
+            fontWeight: 500,
+            fontSize: '14px',
+            lineHeight: '1.5',
+            pointerEvents: 'auto',
+          }}
+          role="alert"
+          aria-live="polite"
+        >
+          <span style={{ wordBreak: 'break-word' }}>{floatingMessage.text}</span>
+          
+          {/* Recovery controls nestled seamlessly inside the notification if storage is locked */}
+          {isReadOnly && (
+            <div style={{ marginTop: '12px', display: 'flex', gap: '8px', flexWrap: 'wrap', justifyContent: 'center' }}>
+              <button className="primary" onClick={handleRestoreBackup} disabled={storageBusy.current} style={{ padding: '6px 16px', fontSize: '13px', borderRadius: '9999px' }}>
+                Restore Backup
+              </button>
+              <button className="secondary" onClick={handleResetStorage} disabled={storageBusy.current} style={{ padding: '6px 16px', fontSize: '13px', borderRadius: '9999px', backgroundColor: 'transparent', borderColor: 'currentColor', color: 'currentColor' }}>
+                Factory Reset
+              </button>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* FULLY STYLED CONFIRMATION MODAL OVERLAY */}
+      {confirmState && (
+        <div 
+          style={{
+            position: 'fixed',
+            top: 0,
+            left: 0,
+            right: 0,
+            bottom: 0,
+            backgroundColor: 'rgba(0, 0, 0, 0.5)',
+            backdropFilter: 'blur(4px)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            zIndex: 10000,
+            padding: '20px',
+            animation: 'fadeIn 0.2s ease-out'
+          }}
+          onClick={() => setConfirmState(null)}
+        >
+          <div 
+            role="dialog" 
+            aria-modal="true" 
+            aria-labelledby="confirm-title" 
+            onClick={(e) => e.stopPropagation()}
+            style={{
+              backgroundColor: 'var(--bg-primary, #ffffff)',
+              border: '1px solid var(--border-color, #e5e7eb)',
+              borderRadius: '16px',
+              padding: '28px',
+              width: '100%',
+              maxWidth: '380px',
+              boxShadow: '0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04)',
+              textAlign: 'center'
+            }}
+          >
+            <h3 id="confirm-title" style={{ margin: '0 0 12px 0', fontSize: '20px', fontWeight: 600, color: 'var(--text-primary)' }}>
+              Confirm Action
+            </h3>
+            <p style={{ margin: '0 0 28px 0', fontSize: '15px', color: 'var(--text-secondary, #666)', lineHeight: '1.5' }}>
+              {confirmState.message}
+            </p>
+            <div style={{ display: 'flex', gap: '12px', justifyContent: 'center' }}>
+              <button
+                className="primary"
+                onClick={() => {
+                  const action = confirmState.onConfirm;
+                  setConfirmState(null);
+                  action();
+                }}
+                style={{ flex: 1, padding: '10px', fontSize: '14px', fontWeight: 500, borderRadius: '8px' }}
+              >
+                OK
+              </button>
+              <button 
+                className="secondary" 
+                onClick={() => setConfirmState(null)}
+                style={{ flex: 1, padding: '10px', fontSize: '14px', fontWeight: 500, borderRadius: '8px' }}
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       <div
         aria-hidden="true"
         onMouseDown={handleWindowMouseDown}
         style={{ height: '12px', flexShrink: 0, cursor: 'move' }}
       />
+      
       {(viewState === 'capture' || viewState === 'library') && (
         <button
           className="secondary theme-toggle"
@@ -562,62 +770,19 @@ export default function App() {
         </button>
       )}
       
-      {(initStatus !== 'success' || initError || globalError) && (
-        <div
-          className={globalError === 'Please enter instructions to build a prompt.' ? 'status-region status-region--validation' : 'status-region'}
-          role="status"
-          aria-live="polite"
-        >
-          <div>{globalError || initError || (initStatus === 'loading' ? 'Loading templates…' : null)}</div>
-          
-          {isReadOnly && (
-            <div style={{ marginTop: '12px', display: 'flex', gap: '8px' }}>
-              <button className="primary" onClick={handleRestoreBackup} disabled={storageBusy.current}>
-                Restore Backup
-              </button>
-              <button className="secondary" onClick={handleResetStorage} disabled={storageBusy.current}>
-                Factory Reset
-              </button>
-            </div>
-          )}
-        </div>
-      )}
-      
       <div data-scrollable style={{ flex: 1, overflowY: 'auto', paddingBottom: '24px' }}>
-        {confirmState && (
-          <div className="confirm-backdrop" onClick={() => setConfirmState(null)}>
-            <div className="confirm-dialog" role="dialog" aria-modal="true" aria-labelledby="confirm-title" onClick={(e) => e.stopPropagation()}>
-              <h3 id="confirm-title">Confirm action</h3>
-              <p>{confirmState.message}</p>
-              <div className="confirm-actions">
-                <button
-                  className="primary"
-                  onClick={() => {
-                    const action = confirmState.onConfirm;
-                    setConfirmState(null);
-                    action();
-                  }}
-                >
-                  OK
-                </button>
-                <button className="secondary" onClick={() => setConfirmState(null)}>
-                  Cancel
-                </button>
-              </div>
-            </div>
-          </div>
-        )}
-
         {viewState === 'builder' && builderSession && (
           <TemplateBuilder 
             session={builderSession}
             onSave={handleSaveBuilderTemplate}
             onCancel={() => {
+              clearMessage(); // Dismisses warnings when cancelling the builder
               dispatchWorkflow({ type: 'SET_BUILDER_SESSION', builderSession: null });
               setViewState('library');
             }}
             isSaving={isSaving}
             storageLocked={isReadOnly}
+            requestConfirmation={requestConfirmation}
           />
         )}
         {viewState === 'editor' && session && draftTemplate && (
@@ -667,41 +832,59 @@ export default function App() {
         )}
 
         {viewState === 'capture' && (
-  <div style={{ maxWidth: '500px', margin: '24px auto', padding: '0 20px' }}>
-    <h2 style={{ fontSize: '24px', fontWeight: 600, letterSpacing: '-0.02em', margin: '0 0 6px' }}>
-      Clear prompts, less effort
-    </h2>
-    <p style={{ color: 'var(--text-secondary)', fontSize: '13px', lineHeight: '1.5', letterSpacing: '0.01em', margin: '0 0 14px 0', maxWidth: '440px' }}>
-      Turn your idea into a prompt that fits your goal. Choose a template, refine it, and copy it to your AI tool.
-    </p>
+          <div className="animate-panel" style={{ maxWidth: '500px', margin: '24px auto', padding: '0 20px' }}>
+            <h2 style={{ fontSize: '24px', fontWeight: 600, letterSpacing: '-0.02em', margin: '0 0 6px' }}>
+              Clear prompts, less effort
+            </h2>
+            <p style={{ color: 'var(--text-secondary)', fontSize: '14px', lineHeight: '1.5', letterSpacing: '0.01em', margin: '0 0 14px 0', maxWidth: '440px' }}>
+              Turn your idea into a prompt that fits your goal. Choose a template, refine it, and copy it to your AI tool.
+            </p>
 
-    <label htmlFor="manual-capture" style={{ display: 'block', marginBottom: '8px', fontSize: '14px', fontWeight: 500 }}>
-      What are you working on?
-    </label>
-    <textarea
-      ref={inputRef}
-      id="manual-capture"
-      rows={4}
-      value={manualInput}
-      onChange={(e) => {
-        const value = e.target.value;
-        dispatchWorkflow({ type: 'UPDATE_INPUT', value });
-        if (value.trim()) setGlobalError(null);
-      }}
-      placeholder="A question, draft, code, or notes..."
-    />
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: '8px' }}>
+              <label htmlFor="manual-capture" style={{ fontSize: '14px', fontWeight: 500 }}>
+                What are you working on?
+              </label>
+              {manualInput.length === 0 && (
+                <button 
+                  type="button" 
+                  className="text-link"
+                  onClick={() => {
+                    if (workflowRef.current.manualInput.length === 0) {
+                      const example = "Explain the differences between standard polling and WebSockets for real-time data, focusing on resource overhead.";
+                      dispatchWorkflow({ type: 'UPDATE_INPUT', value: example });
+                      clearMessage();
+                    }
+                  }}
+                >
+                  Try an example
+                </button>
+              )}
+            </div>
+            
+            <textarea
+              ref={inputRef}
+              id="manual-capture"
+              rows={4}
+              value={manualInput}
+              onChange={(e) => {
+                const value = e.target.value;
+                dispatchWorkflow({ type: 'UPDATE_INPUT', value });
+                if (value.trim()) clearMessage();
+              }}
+              placeholder="A question, draft, code, or notes..."
+            />
 
-    <div className="action-row" style={{ justifyContent: 'flex-start', marginTop: '12px' }}>
-      <button className="primary" onClick={handleStartCapture}>Build prompt</button>
-      <button className="secondary" onClick={() => {
-        setGlobalError(null);
-        setViewState('library');
-      }}>
-        View templates
-      </button>
-    </div>
-  </div>
-)}
+            <div className="action-row" style={{ justifyContent: 'flex-start', marginTop: '12px' }}>
+              <button className="primary" onClick={handleStartCapture}>Build prompt</button>
+              <button className="secondary" onClick={() => {
+                clearMessage();
+                setViewState('library');
+              }}>
+                View templates
+              </button>
+            </div>
+          </div>
+        )}
       </div>
       <div className="bottom-safe-bar" aria-hidden="true" />
     </div>

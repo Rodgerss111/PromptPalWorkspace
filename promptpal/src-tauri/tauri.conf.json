@@ -12,12 +12,25 @@
     "windows": [
       {
         "title": "PromptPal",
+        "label": "main",
         "width": 445,
         "height": 310,
         "decorations": false,
         "transparent": true,
         "shadow": false,
         "resizable": true
+      },
+      {
+        "title": "PromptPal Companion",
+        "label": "companion",
+        "width": 100,
+        "height": 100,
+        "transparent": true,
+        "decorations": false,
+        "alwaysOnTop": true,
+        "skipTaskbar": true,
+        "resizable": false,
+        "shadow": false
       }
     ],
     "security": {

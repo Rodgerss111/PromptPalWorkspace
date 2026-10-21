@@ -45,29 +45,45 @@ pub fn run() {
 
 #[tauri::command]
 fn load_user_data(
+    window: tauri::Window,
     manager: tauri::State<'_, store::PersistenceManager>,
 ) -> Result<store::StoreSnapshot, String> {
+    if window.label() != "main" {
+        return Err("FATAL: Unauthorized process: Storage access restricted to main window".to_string());
+    }
     manager.load_snapshot().map_err(|error| error.to_string())
 }
 
 #[tauri::command]
 fn save_user_data(
+    window: tauri::Window,
     manager: tauri::State<'_, store::PersistenceManager>,
     snapshot: store::StoreSnapshot,
 ) -> Result<(), String> {
+    if window.label() != "main" {
+        return Err("FATAL: Unauthorized process: Storage access restricted to main window".to_string());
+    }
     manager.save_snapshot(&snapshot).map_err(|error| error.to_string())
 }
 
 #[tauri::command]
 fn reset_storage(
+    window: tauri::Window,
     manager: tauri::State<'_, store::PersistenceManager>,
 ) -> Result<(), String> {
+    if window.label() != "main" {
+        return Err("FATAL: Unauthorized process: Storage access restricted to main window".to_string());
+    }
     manager.reset_to_factory().map_err(|error| error.to_string())
 }
 
 #[tauri::command]
 fn restore_storage(
+    window: tauri::Window,
     manager: tauri::State<'_, store::PersistenceManager>,
 ) -> Result<(), String> {
+    if window.label() != "main" {
+        return Err("FATAL: Unauthorized process: Storage access restricted to main window".to_string());
+    }
     manager.restore_backup().map_err(|error| error.to_string())
 }

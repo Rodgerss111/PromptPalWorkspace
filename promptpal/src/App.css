@@ -439,3 +439,34 @@ textarea {
   padding: 6px 16px;
   white-space: nowrap;
 }
+
+@keyframes slideFadeIn {
+  from { opacity: 0; transform: translateY(12px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.animate-panel {
+  animation: slideFadeIn 0.2s cubic-bezier(0.25, 1, 0.5, 1) forwards;
+}
+
+.text-link {
+  background: none;
+  border: none;
+  color: var(--accent-blue);
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  padding: 0;
+}
+
+.text-link:hover {
+  text-decoration: underline;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .animate-panel {
+    animation: none !important;
+    transform: none !important;
+    opacity: 1 !important;
+  }
+}
