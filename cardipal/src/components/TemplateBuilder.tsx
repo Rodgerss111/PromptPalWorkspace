@@ -125,7 +125,22 @@ export function TemplateBuilder({ session, onSave, onCancel, isSaving, storageLo
               <textarea id="tpl-ctx" rows={2} value={contextText} onChange={handleTextChange(setContextText)} placeholder="e.g., Act as a senior developer..." style={{ width: '100%' }} disabled={isSaving} />
             </div>
             <div>
-              <label htmlFor="tpl-tsk" style={{ display: 'block', fontSize: '13px', marginBottom: '4px' }}>Task (Action) * - Must contain {'{{user_input}}'}</label>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end', marginBottom: '6px' }}>
+                <label htmlFor="tpl-tsk" style={{ display: 'block', fontSize: '13px', fontWeight: 600, margin: 0 }}>Task (Action) *</label>
+                <button 
+                  type="button" 
+                  style={{ background: 'none', border: 'none', color: 'var(--accent-blue, #0284c7)', fontSize: '12px', cursor: 'pointer', padding: 0, fontWeight: 500 }}
+                  onClick={() => setTaskText(prev => prev + (prev.endsWith(' ') ? '' : ' ') + '{{user_input}}')}
+                  disabled={isSaving}
+                >
+                  + Insert {'{{user_input}}'}
+                </button>
+              </div>
+              
+              <div style={{ fontSize: '12px', color: 'var(--accent-blue, #0284c7)', backgroundColor: 'rgba(2, 132, 199, 0.1)', padding: '8px 12px', borderRadius: '6px', marginBottom: '8px', lineHeight: '1.4' }}>
+                <strong>Crucial:</strong> Leave exactly <code>{'{{user_input}}'}</code> in this box. The app automatically swaps it with the user's captured text later. <strong>Do not replace it manually.</strong>
+              </div>
+              
               <textarea id="tpl-tsk" rows={3} value={taskText} onChange={handleTextChange(setTaskText)} placeholder="e.g., Review this code: {{user_input}}" style={{ width: '100%' }} disabled={isSaving} />
             </div>
             <div>

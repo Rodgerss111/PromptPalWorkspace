@@ -7,7 +7,7 @@ import { clearShortcutCallback, registerGlobalShortcut, releaseGlobalShortcuts }
 import { requestVisibility, toggleVisibility } from './utils/window';
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
-import { getCurrentWindow } from '@tauri-apps/api/window';
+import { getCurrentWindow, Window } from '@tauri-apps/api/window';
 import type { Template, SessionState, Preferences, StoreSnapshot, Variable } from './types';
 import './App.css';
 
@@ -113,6 +113,9 @@ export default function App() {
   const [theme, setTheme] = useState<'dark' | 'light'>('light');
   const [viewState, setViewState] = useState<'capture' | 'library' | 'editor' | 'builder'>('capture');
   const [focusRequested, setFocusRequested] = useState(false);
+  
+  const [launcherVisible, setLauncherVisible] = useState(true);
+  const [isToggling, setIsToggling] = useState(false);
 
   const workflowRef = useRef(initialWorkflowState);
   const [workflow, rawDispatchWorkflow] = useReducer(reduceWorkflow, initialWorkflowState);
@@ -174,7 +177,6 @@ export default function App() {
     setConfirmState({ message, onConfirm });
   }, []);
 
-  // FIXED: Ensure the modal consumes Escape keys without hiding the app window
   useEffect(() => {
     const handleConfirmEscape = (e: KeyboardEvent) => {
       if (e.key === 'Escape' && confirmState) {
@@ -191,7 +193,7 @@ export default function App() {
     let cancelled = false;
     
     loadUserData()
-      .then(result => {
+      .then(async result => {
         if (cancelled) return;
         if (result.status === 'success') {
           const snap = result.snapshot;
@@ -200,6 +202,23 @@ export default function App() {
           setFavoriteIds(snap.preferences.favoriteTemplateIds);
           preferencesRef.current = snap.preferences;
           dataRevisionRef.current = snap.preferences.dataRevision;
+          
+          const iconVis = snap.preferences.iconVisible ?? true;
+          setLauncherVisible(iconVis);
+          
+          try {
+            const companion = await Window.getByLabel('companion');
+            if (!companion) throw new Error('Companion window not found');
+            
+            if (iconVis) {
+              await companion.show();
+            } else {
+              await companion.hide();
+            }
+          } catch (e) {
+            console.error("Could not sync companion visibility on boot:", e);
+          }
+
           setIsReadOnly(false);
           setInitStatus('success');
         } else {
@@ -338,7 +357,7 @@ export default function App() {
     const unlistenSingleInstancePromise = setupSingleInstance();
 
     const setupCompanionListener = async () => {
-      return await listen('summon-promptpal', () => {
+      return await listen('summon-cardipal', () => {
         if (!isMounted.current) return;
 
         const activationId = ++currentActivationId.current;
@@ -465,11 +484,13 @@ export default function App() {
     setViewState('editor');
   };
 
-  const executePessimisticSave = async (newTemplates: Template[], newFavorites: string[]): Promise<boolean> => {
+  const executePessimisticSave = async (newTemplates: Template[], newFavorites: string[], newIconVisible?: boolean): Promise<boolean> => {
     if (isReadOnly || storageBusy.current || !preferencesRef.current) return false;
     storageBusy.current = true;
     setIsSaving(true);
     clearMessage();
+    
+    const nextIconVisible = newIconVisible !== undefined ? newIconVisible : (preferencesRef.current.iconVisible ?? true);
     
     try {
       const snapshot: StoreSnapshot = {
@@ -477,7 +498,8 @@ export default function App() {
         preferences: {
           ...preferencesRef.current,
           favoriteTemplateIds: newFavorites,
-          dataRevision: dataRevisionRef.current
+          dataRevision: dataRevisionRef.current,
+          iconVisible: nextIconVisible
         }
       };
 
@@ -485,6 +507,7 @@ export default function App() {
       if (result.success) {
         setCustomTemplates(newTemplates);
         setFavoriteIds(newFavorites);
+        preferencesRef.current = snapshot.preferences;
         dataRevisionRef.current += 1; 
         return true;
       } else {
@@ -586,8 +609,8 @@ export default function App() {
     return success;
   };
 
- const goBackToLibrary = useCallback(() => {
-    clearMessage(); // Dismisses any stuck warnings when clicking Back
+  const goBackToLibrary = useCallback(() => {
+    clearMessage();
     invalidateFeedback(); 
     setViewState('library');
   }, [clearMessage, invalidateFeedback]);
@@ -605,8 +628,6 @@ export default function App() {
     void getCurrentWindow().startDragging();
   };
 
-  // FIXED: AppMessage (runtime errors) now take priority over initialization errors
-  // Resolve which message to show in the floating oval
   let floatingMessage = null;
   if (appMessage) {
     floatingMessage = appMessage;
@@ -615,7 +636,6 @@ export default function App() {
   } else if (initError) {
     floatingMessage = { text: initError, type: 'error' as MessageType };
   } else if (isReadOnly) {
-    // Fallback if isReadOnly is true but previous errors were cleared
     floatingMessage = { text: 'Storage is locked. Please restore or reset data.', type: 'error' as MessageType };
   }
 
@@ -640,7 +660,6 @@ export default function App() {
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100vh', position: 'relative' }}>
       
-      {/* Dynamic Floating Notification Oval */}
       {floatingMessage && msgStyles && (
         <div
           style={{
@@ -673,7 +692,6 @@ export default function App() {
         >
           <span style={{ wordBreak: 'break-word' }}>{floatingMessage.text}</span>
           
-          {/* Recovery controls nestled seamlessly inside the notification if storage is locked */}
           {isReadOnly && (
             <div style={{ marginTop: '12px', display: 'flex', gap: '8px', flexWrap: 'wrap', justifyContent: 'center' }}>
               <button className="primary" onClick={handleRestoreBackup} disabled={storageBusy.current} style={{ padding: '6px 16px', fontSize: '13px', borderRadius: '9999px' }}>
@@ -687,7 +705,6 @@ export default function App() {
         </div>
       )}
 
-      {/* FULLY STYLED CONFIRMATION MODAL OVERLAY */}
       {confirmState && (
         <div 
           style={{
@@ -776,7 +793,7 @@ export default function App() {
             session={builderSession}
             onSave={handleSaveBuilderTemplate}
             onCancel={() => {
-              clearMessage(); // Dismisses warnings when cancelling the builder
+              clearMessage();
               dispatchWorkflow({ type: 'SET_BUILDER_SESSION', builderSession: null });
               setViewState('library');
             }}
@@ -874,13 +891,57 @@ export default function App() {
               placeholder="A question, draft, code, or notes..."
             />
 
-            <div className="action-row" style={{ justifyContent: 'flex-start', marginTop: '12px' }}>
+            <div className="action-row" style={{ justifyContent: 'flex-start', marginTop: '12px', flexWrap: 'wrap' }}>
               <button className="primary" onClick={handleStartCapture}>Build prompt</button>
               <button className="secondary" onClick={() => {
                 clearMessage();
                 setViewState('library');
               }}>
                 View templates
+              </button>
+              
+              <button 
+                className="secondary" 
+                disabled={isToggling}
+                onClick={async () => {
+                  if (isToggling) return;
+                  setIsToggling(true);
+                  try {
+                    const companion = await Window.getByLabel('companion');
+                    if (!companion) throw new Error('Companion window not found');
+                    
+                    const targetVisibility = !launcherVisible;
+                    if (targetVisibility) {
+                      await companion.show();
+                    } else {
+                      await companion.hide();
+                    }
+                    
+                    const isNowVisible = await companion.isVisible();
+                    if (isNowVisible !== targetVisibility) {
+                      throw new Error(`Companion did not toggle. Expected ${targetVisibility} but is ${isNowVisible}.`);
+                    }
+
+                    const saveSuccess = await executePessimisticSave(customTemplates, favoriteIds, isNowVisible);
+                    if (!saveSuccess) {
+                      if (launcherVisible) {
+                        await companion.show();
+                      } else {
+                        await companion.hide();
+                      }
+                      throw new Error('Failed to save preference. Companion visibility rolled back.');
+                    }
+
+                    setLauncherVisible(isNowVisible);
+                  } catch (err: any) {
+                    console.error('Toggle Launcher Error:', err);
+                    showWarning(`Toggle failed: ${err.message || String(err)}`);
+                  } finally {
+                    setIsToggling(false);
+                  }
+                }}
+              >
+                {isToggling ? 'Toggling...' : (launcherVisible ? 'Hide Cardi' : 'Show Cardi')}
               </button>
             </div>
           </div>

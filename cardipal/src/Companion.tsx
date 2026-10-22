@@ -28,6 +28,7 @@ export function Companion() {
 
   useEffect(() => {
     reducedMotion.current = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
     return () => {
       if (frameId.current !== null) {
         cancelAnimationFrame(frameId.current);
@@ -108,7 +109,7 @@ export function Companion() {
     
     if (frameId.current !== null) {
       cancelAnimationFrame(frameId.current);
-      frameId.current = null; // FIXED: Safely clears the frame so the next drag can start
+      frameId.current = null;
     }
 
     const s = state.current;
@@ -249,7 +250,7 @@ export function Companion() {
     state.current.wasDragged = false;
     
     try {
-      await emit('summon-promptpal');
+      await emit('summon-cardipal');
     } catch (err) {
       console.error('Failed to emit summon:', err);
     }
@@ -274,21 +275,20 @@ export function Companion() {
         userSelect: 'none',
         background: 'transparent',
         border: 'none',
-        outline: 'none', // This removes the white square focus ring
         padding: 0
       }}
     >
       <img 
-        src="/launcher.png" // Change this to match your filename in the public/ folder
+        src="/launcher.png"
         alt="PromptPal Launcher"
-        draggable={false} // CRITICAL: Prevents native HTML5 ghost dragging
+        draggable={false}
         style={{
           width: '60px',
           height: '60px',
           borderRadius: '50%',
-          objectFit: 'cover', // Ensures the image perfectly fills the circle without stretching
+          objectFit: 'cover',
           filter: 'drop-shadow(0 4px 12px rgba(0,0,0,0.2))',
-          pointerEvents: 'none' // CRITICAL: Lets the button handle all physics math
+          pointerEvents: 'none'
         }} 
       />
     </button>

@@ -13,6 +13,8 @@
     "core:window:allow-unminimize",
     "global-shortcut:allow-register",
     "global-shortcut:allow-unregister",
-    "core:event:allow-emit"
+    "core:event:allow-emit",
+    "core:window:allow-get-all-windows",
+    "core:window:allow-is-visible"
   ]
 }

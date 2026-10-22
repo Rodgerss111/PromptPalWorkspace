@@ -17,46 +17,6 @@ interface PromptEditorProps {
   onAppendToDraft: (section: 'contextText' | 'taskText' | 'formatText', textToAppend: string, newVariables: Variable[]) => void;
 }
 
-function HighlightedTextarea({ id, value, onChange, rows, autoFocus }: { id: string, value: string, onChange: (v: string) => void, rows: number, autoFocus?: boolean }) {
-  const backdropRef = useRef<HTMLDivElement>(null);
-
-  const handleScroll = (e: React.UIEvent<HTMLTextAreaElement>) => {
-    if (backdropRef.current) {
-      backdropRef.current.scrollTop = e.currentTarget.scrollTop;
-      backdropRef.current.scrollLeft = e.currentTarget.scrollLeft;
-    }
-  };
-
-  return (
-    <div style={{ position: 'relative', width: '100%' }}>
-      <div 
-        ref={backdropRef}
-        aria-hidden="true"
-        style={{
-          position: 'absolute', top: 0, left: 0, right: 0, bottom: 0,
-          padding: '12px', fontSize: '14px', fontFamily: 'inherit',
-          lineHeight: '1.5', whiteSpace: 'pre-wrap', wordWrap: 'break-word', 
-          color: 'transparent', pointerEvents: 'none', overflow: 'hidden',
-          borderColor: 'transparent', borderWidth: '1px', borderStyle: 'solid'
-        }}
-      >
-        {value.split(/(\{\{[^}]+\}\})/g).map((part, i) => 
-          part.startsWith('{{') && part.endsWith('}}') ? 
-            <span key={i} style={{ backgroundColor: 'rgba(59, 130, 246, 0.2)', color: 'transparent', borderRadius: '3px' }}>{part}</span> 
-          : part
-        )}
-      </div>
-      <textarea
-        id={id} rows={rows} value={value} 
-        onChange={e => onChange(e.target.value)} 
-        onScroll={handleScroll}
-        autoFocus={autoFocus}
-        style={{ position: 'relative', backgroundColor: 'transparent' }}
-      />
-    </div>
-  );
-}
-
 export function PromptEditor({ 
   draftTemplate, onTemplateChange, 
   draftVariables, onVariablesChange, 
@@ -89,7 +49,6 @@ export function PromptEditor({
     };
   }, []);
 
-  // Securely manage focus entry when the Append view opens
   useEffect(() => {
     if (appendViewOpen && appendContainerRef.current) {
       const input = appendContainerRef.current.querySelector('input');
@@ -109,7 +68,6 @@ export function PromptEditor({
     setTimeout(() => appendButtonRef.current?.focus(), 0);
   };
 
-  // Dedicated focus trap and early interception for the Append View
   const handleAppendTrap = (e: React.KeyboardEvent<HTMLDivElement>) => {
     if (e.key === 'Escape') {
       e.preventDefault(); 
@@ -142,7 +100,6 @@ export function PromptEditor({
     }
   };
 
-  // Secure interception for the standard Editor View
   const handleEditorEscape = (e: React.KeyboardEvent<HTMLDivElement>) => {
     if (e.key === 'Escape') {
       e.preventDefault();
@@ -183,7 +140,6 @@ export function PromptEditor({
     });
   }, [allTemplates, appendCategory, appendSearch]);
 
-  // FULL-PANE APPEND VIEW
   if (appendViewOpen) {
     return (
       <div 
@@ -293,7 +249,6 @@ export function PromptEditor({
     );
   }
 
-  // STANDARD EDITOR VIEW
   return (
     <div 
       onKeyDownCapture={handleEditorEscape}
@@ -317,23 +272,31 @@ export function PromptEditor({
       <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
         <div>
           <label htmlFor="ctx-input" style={{ display: 'block', fontWeight: 500, marginBottom: '6px' }}>Context (Background)</label>
-          <HighlightedTextarea 
+          <textarea 
             id="ctx-input" rows={2} value={draftTemplate.contextText} autoFocus
-            onChange={(val) => handleSectionChange('contextText', val)} 
+            onChange={(e) => handleSectionChange('contextText', e.target.value)} 
+            style={{ width: '100%', padding: '12px', fontFamily: 'inherit', fontSize: '14px', lineHeight: '1.5' }}
           />
         </div>
         <div>
           <label htmlFor="tsk-input" style={{ display: 'block', fontWeight: 500, marginBottom: '6px' }}>Task (Action)</label>
-          <HighlightedTextarea 
+          
+          <div style={{ fontSize: '13px', color: 'var(--text-secondary)', backgroundColor: 'var(--bg-secondary)', padding: '8px 12px', borderRadius: '6px', marginBottom: '8px' }}>
+            Your text is added here automatically. Keep <code style={{ color: 'var(--accent-blue)', fontWeight: 600 }}>{'{{user_input}}'}</code> in the task.
+          </div>
+          
+          <textarea 
             id="tsk-input" rows={3} value={draftTemplate.taskText} 
-            onChange={(val) => handleSectionChange('taskText', val)} 
+            onChange={(e) => handleSectionChange('taskText', e.target.value)} 
+            style={{ width: '100%', padding: '12px', fontFamily: 'inherit', fontSize: '14px', lineHeight: '1.5' }}
           />
         </div>
         <div>
           <label htmlFor="fmt-input" style={{ display: 'block', fontWeight: 500, marginBottom: '6px' }}>Format (Presentation)</label>
-          <HighlightedTextarea 
+          <textarea 
             id="fmt-input" rows={2} value={draftTemplate.formatText} 
-            onChange={(val) => handleSectionChange('formatText', val)} 
+            onChange={(e) => handleSectionChange('formatText', e.target.value)} 
+            style={{ width: '100%', padding: '12px', fontFamily: 'inherit', fontSize: '14px', lineHeight: '1.5' }}
           />
         </div>
 

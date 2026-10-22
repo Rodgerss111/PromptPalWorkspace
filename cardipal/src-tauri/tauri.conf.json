@@ -1,7 +1,7 @@
 {
-  "productName": "PromptPal",
+  "productName": "CardiPal",
   "version": "0.1.0",
-  "identifier": "com.promptpal.dev",
+  "identifier": "com.cardipal.dev",
   "build": {
     "beforeDevCommand": "npm run dev",
     "beforeBuildCommand": "npm run build",
@@ -11,7 +11,7 @@
   "app": {
     "windows": [
       {
-        "title": "PromptPal",
+        "title": "CardiPal",
         "label": "main",
         "width": 445,
         "height": 310,
