@@ -70,7 +70,19 @@ impl Serialize for StoreError {
 #[serde(rename_all = "camelCase")]
 pub struct StoreSnapshot {
     pub templates: Vec<Template>,
+    #[serde(default)]
+    pub saved_prompts: Vec<SavedPrompt>,
     pub preferences: Preferences,
+}
+
+#[derive(Serialize, Deserialize, Clone, PartialEq, Debug)]
+#[serde(rename_all = "camelCase")]
+pub struct SavedPrompt {
+    pub id: String,
+    pub title: String,
+    pub text: String,
+    pub created_at: u64,
+    pub updated_at: u64,
 }
 
 #[derive(Serialize, Deserialize, Clone, PartialEq, Debug)]
@@ -141,13 +153,13 @@ fn get_canonical_builtins() -> Vec<Template> {
             is_built_in: true, created_at: 0, updated_at: 0,
         },
         Template {
-            id: "builtin-natural-paragraph".into(), schema_version: 1, name: "Natural Paragraph Writer".into(), category: "Writing".into(),
-            context_text: "I need to write or improve content. The writing should sound natural, authentic, and appropriate for the situation.".into(),
-            task_text: "Write or improve the following content: {{user_input}}\nAudience or Purpose: {{audience}}\nUse simple, easy-to-understand words. Preserve the original meaning and important details. Remove redundancy, exaggerated claims, generic expressions, and unnecessarily formal language. Do not invent facts or experiences.".into(),
-            format_text: "Write in paragraph form, not bullet points. Use a natural flow, clear sentences, and an appropriate tone. Keep it as concise as the purpose allows while preserving the necessary information.".into(),
+            id: "builtin-executive-refiner".into(), schema_version: 1, name: "Executive Communication Refiner".into(), category: "Writing".into(),
+            context_text: "You are an expert executive communication coach. Your goal is to refine raw drafts into clear, concise, and professional statements suitable for corporate leadership or academic panels.".into(),
+            task_text: "Please rewrite the following draft to improve its clarity, professional tone, and impact while keeping the original meaning intact. Tailor the tone for a {{audience}}.\n\nDraft to refine:\n{{user_input}}".into(),
+            format_text: "Structure your response in two parts:\n1. **Refined Draft:** (The polished version of the text)\n2. **Coach's Notes:** (A brief, bulleted list of 2-3 specific improvements you made to the tone, vocabulary, or structure and why).".into(),
             variables: vec![
-                Variable { name: "user_input".into(), label: "Topic or Draft".into(), required: true, default_value: "".into() },
-                Variable { name: "audience".into(), label: "Audience/Purpose".into(), required: true, default_value: "".into() }
+                Variable { name: "user_input".into(), label: "Rough Draft".into(), required: true, default_value: "".into() },
+                Variable { name: "audience".into(), label: "Target Audience".into(), required: true, default_value: "Panel of Evaluators".into() }
             ],
             is_built_in: true, created_at: 0, updated_at: 0,
         },
@@ -286,7 +298,6 @@ impl PersistenceManager {
         let log_path = path.with_extension("sqlite.diag.log");
         let timestamp = SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_millis();
         
-        // Mark the start of a new connection attempt and clear stale data for this run
         let _ = fs::write(&log_path, format!("--- RUN {} START ---\n", timestamp));
 
         let log_err = |phase: &str, e: &rusqlite::Error| {
@@ -354,6 +365,16 @@ impl PersistenceManager {
            ).map_err(|e| init_error("Schema_Templates", &e))?;
 
         conn.execute(
+            "CREATE TABLE IF NOT EXISTS saved_prompts (
+                 id TEXT PRIMARY KEY,
+                 title TEXT NOT NULL,
+                 text TEXT NOT NULL,
+                 created_at INTEGER NOT NULL,
+                 updated_at INTEGER NOT NULL
+             );", []
+           ).map_err(|e| init_error("Schema_SavedPrompts", &e))?;
+
+        conn.execute(
             "INSERT OR IGNORE INTO preferences (id, favorite_template_ids, shortcut, launch_at_startup, icon_position, icon_visible, schema_version, data_revision) 
              VALUES (1, '[]', 'Ctrl+Shift+Space', 0, NULL, 1, 1, 1)", []
            ).map_err(|e| init_error("Seed_Insert", &e))?;
@@ -369,7 +390,6 @@ impl PersistenceManager {
             return Err(StoreError::DatabaseCorrupted); 
         }
 
-        // Successfully cleared all initialization and recovery gates
         if let Ok(mut file) = std::fs::OpenOptions::new().append(true).open(&log_path) {
             use std::io::Write;
             let _ = writeln!(file, "--- RUN END (SUCCESS) ---\n");
@@ -440,7 +460,25 @@ impl PersistenceManager {
             });
         }
 
-        Ok(StoreSnapshot { templates, preferences })
+        let mut sp_stmt = conn.prepare("SELECT id, title, text, created_at, updated_at FROM saved_prompts")
+            .map_err(|e| StoreError::Fatal(format!("SavedPrompts prepare failed: {}", e)))?;
+            
+        let sp_iter = sp_stmt.query_map([], |row| {
+            Ok(SavedPrompt {
+                id: row.get(0)?,
+                title: row.get(1)?,
+                text: row.get(2)?,
+                created_at: row.get(3)?,
+                updated_at: row.get(4)?,
+            })
+        }).map_err(|e| StoreError::Fatal(format!("SavedPrompts query_map failed: {}", e)))?;
+
+        let mut saved_prompts = Vec::new();
+        for res in sp_iter {
+            saved_prompts.push(res.map_err(|e| StoreError::Fatal(format!("SavedPrompt row read failed: {}", e)))?);
+        }
+
+        Ok(StoreSnapshot { templates, saved_prompts, preferences })
     }
 
     pub fn save_snapshot(&self, snapshot: &StoreSnapshot) -> Result<(), StoreError> {
@@ -478,6 +516,22 @@ impl PersistenceManager {
         let id_list = custom_ids.iter().map(|id| format!("'{}'", id.replace("'", "''"))).collect::<Vec<_>>().join(",");
         let delete_sql = format!("DELETE FROM templates WHERE is_built_in = 0 AND id NOT IN ({})", if id_list.is_empty() { "''".to_string() } else { id_list });
         tx.execute(&delete_sql, []).map_err(|_| StoreError::AccessDenied)?;
+
+        let mut saved_prompt_ids = Vec::new();
+        for sp in &snapshot.saved_prompts {
+            saved_prompt_ids.push(sp.id.clone());
+            tx.execute(
+                "INSERT INTO saved_prompts (id, title, text, created_at, updated_at) 
+                 VALUES (?1, ?2, ?3, ?4, ?5)
+                 ON CONFLICT(id) DO UPDATE SET 
+                 title=?2, text=?3, updated_at=?5",
+                (&sp.id, &sp.title, &sp.text, sp.created_at, sp.updated_at)
+            ).map_err(|_| StoreError::AccessDenied)?;
+        }
+
+        let sp_id_list = saved_prompt_ids.iter().map(|id| format!("'{}'", id.replace("'", "''"))).collect::<Vec<_>>().join(",");
+        let delete_sp_sql = format!("DELETE FROM saved_prompts WHERE id NOT IN ({})", if sp_id_list.is_empty() { "''".to_string() } else { sp_id_list });
+        tx.execute(&delete_sp_sql, []).map_err(|_| StoreError::AccessDenied)?;
 
         let favs = serde_json::to_string(&snapshot.preferences.favorite_template_ids).map_err(|_| StoreError::ValidationError("Bad favs".into()))?;
         let pos = serde_json::to_string(&snapshot.preferences.icon_position).unwrap_or_else(|_| "null".into());
@@ -786,7 +840,7 @@ mod tests {
         let t2 = thread::spawn(move || {
             b1.wait(); 
             
-            let snap = StoreSnapshot { templates: vec![], preferences: Preferences { favorite_template_ids: vec![], shortcut: "".into(), launch_at_startup: false, icon_position: None, icon_visible: true, schema_version: 1, data_revision: 1 } };
+            let snap = StoreSnapshot { templates: vec![], saved_prompts: vec![], preferences: Preferences { favorite_template_ids: vec![], shortcut: "".into(), launch_at_startup: false, icon_position: None, icon_visible: true, schema_version: 1, data_revision: 1 } };
             let result = m_save.save_snapshot(&snap);
             assert_eq!(result, Err(StoreError::LockedForRestoration));
         });
@@ -845,6 +899,9 @@ mod tests {
             variables: vec![Variable { name: "user_input".into(), label: "Input".into(), required: true, default_value: "".into() }],
             is_built_in: false, created_at: 0, updated_at: 0,
         });
+        snap.saved_prompts.push(SavedPrompt {
+            id: "prompt-1".into(), title: "Title".into(), text: "Text".into(), created_at: 0, updated_at: 0,
+        });
         manager.save_snapshot(&snap).unwrap();
         
         if let Some(handle) = manager.worker.lock().unwrap().take() { handle.join().unwrap(); }
@@ -855,6 +912,7 @@ mod tests {
         assert_eq!(clean_snap.preferences.shortcut, "Ctrl+Shift+Space"); 
         assert!(!clean_snap.templates.iter().any(|t| !t.is_built_in)); 
         assert!(clean_snap.templates.len() > 0); 
+        assert!(clean_snap.saved_prompts.is_empty()); 
         
         let _ = fs::remove_dir_all(&temp_dir);
     }
@@ -884,3 +942,4 @@ mod tests {
         let _ = fs::remove_dir_all(&temp_dir);
     }
 }
+

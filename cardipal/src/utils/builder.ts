@@ -22,6 +22,12 @@ export function validateTemplateBlueprint(template: unknown): { success: true } 
   if (!t.id || !t.name) {
     return { success: false, error: "Template missing id or name.", code: "MISSING_METADATA" };
   }
+  
+  // Validate Strategy Note type if it exists
+  if (hasOwn(t, 'strategyNote') && t.strategyNote !== undefined && typeof t.strategyNote !== 'string') {
+    return { success: false, error: "Strategy note must be a string.", code: "INVALID_STRATEGY_NOTE" };
+  }
+
   if (typeof t.contextText !== 'string' || typeof t.taskText !== 'string' || typeof t.formatText !== 'string') {
     return { success: false, error: "Template sections must be strings.", code: "INVALID_TEMPLATE_SECTIONS" };
   }
@@ -143,7 +149,6 @@ export function getAppendPayload(
     return { success: false, error: "The selected section is empty in the source template." };
   }
 
-  // Strictly reject malformed syntax before parsing valid variables
   const strippedText = textToAppend.replace(PLACEHOLDER_REGEX, '');
   if (strippedText.includes('{{') || strippedText.includes('}}')) {
     return { success: false, error: "Malformed brace syntax detected in the source text. Cannot append." };

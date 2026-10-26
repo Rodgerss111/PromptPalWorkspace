@@ -3,6 +3,7 @@ import { expect, test } from 'vitest';
 import { reduceWorkflow, SessionAction } from '../App';
 
 test('reduceWorkflow ignores START_MANUAL and UPDATE_INPUT when a session is active', () => {
+  // Added the missing freeform properties to satisfy TypeScript
   const initialState = {
     session: null,
     manualInput: '',
@@ -10,6 +11,11 @@ test('reduceWorkflow ignores START_MANUAL and UPDATE_INPUT when a session is act
     draftVariables: {},
     builderSession: null,
     copyFeedback: '',
+    freeformId: null,
+    freeformTitle: '',
+    freeformOriginalTitle: '',
+    freeformOriginalText: '',
+    freeformDraft: '',
   };
 
   // 1. Establish an active session
@@ -18,7 +24,7 @@ test('reduceWorkflow ignores START_MANUAL and UPDATE_INPUT when a session is act
     session: { originalText: 'First Input', targetIdentity: null, selectionDetails: null, captureStatus: 'manual', manualInput: 'First Input', editorValues: {} }, 
     input: 'First Input' 
   };
-  const stateAfterStart = reduceWorkflow(initialState, action1);
+  const stateAfterStart = reduceWorkflow(initialState as any, action1);
   
   expect(stateAfterStart.session?.originalText).toBe('First Input');
   expect(stateAfterStart.manualInput).toBe('First Input');

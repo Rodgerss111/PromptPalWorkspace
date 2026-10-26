@@ -18,7 +18,6 @@ interface TemplateBuilderProps {
 
 type InternalVariable = Variable & { _key: string; _isReserved: boolean };
 
-// FIXED: requestConfirmation is now correctly destructured here
 export function TemplateBuilder({ session, onSave, onCancel, isSaving, storageLocked, requestConfirmation }: TemplateBuilderProps) {
   const isNew = session.mode === 'create' || session.mode === 'duplicate';
   const base = session.template;
@@ -29,6 +28,7 @@ export function TemplateBuilder({ session, onSave, onCancel, isSaving, storageLo
   
   const [name, setName] = useState(() => session.mode === 'duplicate' ? `${base?.name || ''} (Copy)` : (base?.name || ''));
   const [category, setCategory] = useState(base?.category || '');
+  const [strategyNote, setStrategyNote] = useState(base?.strategyNote || '');
   const [contextText, setContextText] = useState(base?.contextText || '');
   const [taskText, setTaskText] = useState(base?.taskText || '');
   const [formatText, setFormatText] = useState(base?.formatText || '');
@@ -65,7 +65,6 @@ export function TemplateBuilder({ session, onSave, onCancel, isSaving, storageLo
     setIsDirty(true);
   };
 
-  // FIXED: Only prompts the user if they actually modified something
   const handleCancel = () => {
     if (isDirty) {
       requestConfirmation("Discard unsaved changes?", () => {
@@ -81,6 +80,7 @@ export function TemplateBuilder({ session, onSave, onCancel, isSaving, storageLo
     schemaVersion: 1,
     name: name.trim(),
     category: category.trim(),
+    strategyNote: strategyNote.trim(), 
     contextText,
     taskText,
     formatText,
@@ -88,12 +88,19 @@ export function TemplateBuilder({ session, onSave, onCancel, isSaving, storageLo
     isBuiltIn: false,
     createdAt,
     updatedAt: Date.now(), 
-  }), [id, name, category, contextText, taskText, formatText, variables, createdAt]);
+  }), [id, name, category, strategyNote, contextText, taskText, formatText, variables, createdAt]);
 
+  // STRICT FRONTEND VALIDATION
+  // This exactly matches your Rust backend rules so the Save button 
+  // remains disabled until everything is properly filled out.
   const validation = useMemo(() => {
     if (!name.trim()) return { success: false, error: 'Template Name is required.' };
+    if (!contextText.trim()) return { success: false, error: 'Context (Background) cannot be empty.' };
+    if (!taskText.trim()) return { success: false, error: 'Task (Action) cannot be empty.' };
+    if (!formatText.trim()) return { success: false, error: 'Format (Presentation) cannot be empty.' };
+    
     return validateTemplateBlueprint(draftTemplate);
-  }, [name, draftTemplate]);
+  }, [name, contextText, taskText, formatText, draftTemplate]);
 
   return (
     <div style={{ maxWidth: '600px', margin: '0 auto', padding: '0 20px' }}>
@@ -112,16 +119,23 @@ export function TemplateBuilder({ session, onSave, onCancel, isSaving, storageLo
           <label htmlFor="tpl-name" style={{ display: 'block', fontWeight: 500, marginBottom: '6px' }}>Template Name *</label>
           <input id="tpl-name" type="text" value={name} onChange={handleTextChange(setName)} placeholder="e.g., Code Reviewer" style={{ width: '100%' }} disabled={isSaving} />
         </div>
+        <div style={{ display: 'flex', gap: '12px' }}>
+          <div style={{ flex: 1 }}>
+            <label htmlFor="tpl-cat" style={{ display: 'block', fontWeight: 500, marginBottom: '6px' }}>Category</label>
+            <input id="tpl-cat" type="text" value={category} onChange={handleTextChange(setCategory)} placeholder="e.g., Development" style={{ width: '100%' }} disabled={isSaving} />
+          </div>
+        </div>
         <div>
-          <label htmlFor="tpl-cat" style={{ display: 'block', fontWeight: 500, marginBottom: '6px' }}>Category</label>
-          <input id="tpl-cat" type="text" value={category} onChange={handleTextChange(setCategory)} placeholder="e.g., Development" style={{ width: '100%' }} disabled={isSaving} />
+          <label htmlFor="tpl-strat" style={{ display: 'block', fontWeight: 500, marginBottom: '6px' }}>Strategy Note (Optional)</label>
+          <input id="tpl-strat" type="text" value={strategyNote} onChange={handleTextChange(setStrategyNote)} placeholder="e.g., Stating the audience helps shape the level of detail." style={{ width: '100%' }} disabled={isSaving} />
+          <div style={{ fontSize: '12px', color: 'var(--text-secondary)', marginTop: '4px' }}>A short tip explaining why this prompt is structured this way.</div>
         </div>
 
         <div style={{ padding: '16px', backgroundColor: 'var(--bg-secondary)', borderRadius: '8px' }}>
           <h3 style={{ margin: '0 0 12px 0', fontSize: '14px' }}>Prompt Structure</h3>
           <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
             <div>
-              <label htmlFor="tpl-ctx" style={{ display: 'block', fontSize: '13px', marginBottom: '4px' }}>Context (Background)</label>
+              <label htmlFor="tpl-ctx" style={{ display: 'block', fontSize: '13px', marginBottom: '4px' }}>Context (Background) *</label>
               <textarea id="tpl-ctx" rows={2} value={contextText} onChange={handleTextChange(setContextText)} placeholder="e.g., Act as a senior developer..." style={{ width: '100%' }} disabled={isSaving} />
             </div>
             <div>
@@ -144,7 +158,7 @@ export function TemplateBuilder({ session, onSave, onCancel, isSaving, storageLo
               <textarea id="tpl-tsk" rows={3} value={taskText} onChange={handleTextChange(setTaskText)} placeholder="e.g., Review this code: {{user_input}}" style={{ width: '100%' }} disabled={isSaving} />
             </div>
             <div>
-              <label htmlFor="tpl-fmt" style={{ display: 'block', fontSize: '13px', marginBottom: '4px' }}>Format (Presentation)</label>
+              <label htmlFor="tpl-fmt" style={{ display: 'block', fontSize: '13px', marginBottom: '4px' }}>Format (Presentation) *</label>
               <textarea id="tpl-fmt" rows={2} value={formatText} onChange={handleTextChange(setFormatText)} placeholder="e.g., Output as a markdown table." style={{ width: '100%' }} disabled={isSaving} />
             </div>
           </div>
@@ -192,6 +206,7 @@ export function TemplateBuilder({ session, onSave, onCancel, isSaving, storageLo
 
       <div className="action-row">
         <button className="secondary" onClick={handleCancel} disabled={isSaving}>Cancel</button>
+        {/* Save button remains disabled if validation.success is false */}
         <button className="primary" disabled={!validation.success || isSaving || storageLocked} onClick={() => onSave(draftTemplate)}>
           {isSaving ? 'Saving...' : 'Save Template'}
         </button>

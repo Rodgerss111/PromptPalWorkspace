@@ -34,6 +34,11 @@ export function PromptEditor({
   const [selectedAppendTemplate, setSelectedAppendTemplate] = useState<Template | null>(null);
   const [previewSection, setPreviewSection] = useState<'contextText' | 'taskText' | 'formatText' | null>(null);
   const [appendError, setAppendError] = useState<string | null>(null);
+  
+  const [showPrivacy, setShowPrivacy] = useState(true);
+  
+  // Track manual edits. 'null' means we use the auto-generated prompt.
+  const [customPrompt, setCustomPrompt] = useState<string | null>(null);
 
   const builderResult = useMemo(() => {
     return assemblePrompt(draftTemplate, { 
@@ -41,6 +46,16 @@ export function PromptEditor({
       user_input: sessionState.originalText 
     });
   }, [draftTemplate, draftVariables, sessionState.originalText]);
+
+  // Safely determine which text to show/copy
+  const displayPrompt = customPrompt !== null 
+    ? customPrompt 
+    : (builderResult.success ? builderResult.prompt : '');
+
+  // Reset the override when a new session starts or the base template changes
+  useEffect(() => {
+    setCustomPrompt(null);
+  }, [sessionState.originalText, draftTemplate.id]);
 
   useEffect(() => {
     isMounted.current = true;
@@ -254,9 +269,15 @@ export function PromptEditor({
       onKeyDownCapture={handleEditorEscape}
       style={{ maxWidth: '500px', margin: '0 auto', padding: '0 20px', animation: 'fadeIn 0.2s ease-in-out', outline: 'none' }}
     >
-      <h2 id="template-title" style={{ fontSize: '24px', fontWeight: 600, marginTop: 0 }}>
+      <h2 id="template-title" style={{ fontSize: '24px', fontWeight: 600, marginTop: 0, marginBottom: draftTemplate.strategyNote ? '12px' : '24px' }}>
         {draftTemplate.name}
       </h2>
+      
+      {draftTemplate.strategyNote && (
+        <div style={{ fontSize: '13px', color: 'var(--accent-blue, #0284c7)', backgroundColor: 'rgba(2, 132, 199, 0.08)', padding: '12px 16px', borderRadius: '8px', marginBottom: '24px', borderLeft: '3px solid var(--accent-blue, #0284c7)', lineHeight: '1.5' }}>
+          <strong>💡 Strategy Note:</strong> {draftTemplate.strategyNote}
+        </div>
+      )}
       
       <div style={{ padding: '12px', backgroundColor: 'var(--bg-secondary)', borderRadius: '8px', marginBottom: '24px' }}>
         <h3 style={{ fontSize: '13px', margin: '0 0 8px 0', color: 'var(--text-secondary)' }}>Original Question</h3>
@@ -266,6 +287,7 @@ export function PromptEditor({
           rows={3}
           value={sessionState.originalText}
           aria-label="Your original question"
+          style={{ width: '100%', padding: '12px', fontFamily: 'inherit', fontSize: '14px', lineHeight: '1.5', border: '1px solid var(--border-color)', borderRadius: '6px' }}
         />
       </div>
 
@@ -275,7 +297,7 @@ export function PromptEditor({
           <textarea 
             id="ctx-input" rows={2} value={draftTemplate.contextText} autoFocus
             onChange={(e) => handleSectionChange('contextText', e.target.value)} 
-            style={{ width: '100%', padding: '12px', fontFamily: 'inherit', fontSize: '14px', lineHeight: '1.5' }}
+            style={{ width: '100%', padding: '12px', fontFamily: 'inherit', fontSize: '14px', lineHeight: '1.5', border: '1px solid var(--border-color)', borderRadius: '6px' }}
           />
         </div>
         <div>
@@ -288,7 +310,7 @@ export function PromptEditor({
           <textarea 
             id="tsk-input" rows={3} value={draftTemplate.taskText} 
             onChange={(e) => handleSectionChange('taskText', e.target.value)} 
-            style={{ width: '100%', padding: '12px', fontFamily: 'inherit', fontSize: '14px', lineHeight: '1.5' }}
+            style={{ width: '100%', padding: '12px', fontFamily: 'inherit', fontSize: '14px', lineHeight: '1.5', border: '1px solid var(--border-color)', borderRadius: '6px' }}
           />
         </div>
         <div>
@@ -296,7 +318,7 @@ export function PromptEditor({
           <textarea 
             id="fmt-input" rows={2} value={draftTemplate.formatText} 
             onChange={(e) => handleSectionChange('formatText', e.target.value)} 
-            style={{ width: '100%', padding: '12px', fontFamily: 'inherit', fontSize: '14px', lineHeight: '1.5' }}
+            style={{ width: '100%', padding: '12px', fontFamily: 'inherit', fontSize: '14px', lineHeight: '1.5', border: '1px solid var(--border-color)', borderRadius: '6px' }}
           />
         </div>
 
@@ -314,17 +336,32 @@ export function PromptEditor({
         ))}
       </div>
 
-      <div style={{ marginTop: '24px', padding: '16px', backgroundColor: 'var(--bg-secondary)', borderRadius: '12px' }}>
-        <h3 style={{ fontSize: '14px', margin: '0 0 12px 0' }}>Final Preview</h3>
+      <div style={{ marginTop: '24px', padding: '16px', backgroundColor: 'var(--bg-secondary)', borderRadius: '12px', marginBottom: '24px' }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '12px' }}>
+          <h3 style={{ fontSize: '14px', margin: 0 }}>Final Preview</h3>
+          {customPrompt !== null && (
+            <div style={{ display: 'flex', alignItems: 'center', gap: '12px', textAlign: 'right' }}>
+              <span style={{ fontSize: '11px', color: 'var(--warning-text, #d97706)', maxWidth: '260px', lineHeight: '1.3' }}>
+                <strong>Manual version:</strong> Changes to the fields above will not update this text. Reset to generated to include them.
+              </span>
+              <button className="secondary" style={{ fontSize: '11px', padding: '4px 8px', flexShrink: 0 }} onClick={() => setCustomPrompt(null)}>
+                Reset to generated
+              </button>
+            </div>
+          )}
+        </div>
+
         {!builderResult.success ? (
           <div role="alert" style={{ color: 'var(--danger-text)', fontSize: '13px', fontWeight: 500 }}>
             {builderResult.code}: {builderResult.error} {builderResult.details || ''}
           </div>
         ) : (
           <textarea 
-            className="readonly-text" readOnly rows={6}
-            style={{ fontFamily: 'inherit', whiteSpace: 'pre-wrap' }}
-            value={builderResult.prompt} aria-label="Final assembled prompt preview"
+            rows={6}
+            style={{ width: '100%', padding: '12px', fontFamily: 'inherit', fontSize: '14px', lineHeight: '1.5', border: '1px solid var(--border-color)', borderRadius: '6px', whiteSpace: 'pre-wrap', backgroundColor: 'var(--bg-primary)', color: 'var(--text-primary)' }}
+            value={displayPrompt} 
+            onChange={(e) => setCustomPrompt(e.target.value)}
+            aria-label="Final assembled prompt preview (Editable)"
           />
         )}
 
@@ -335,7 +372,27 @@ export function PromptEditor({
         </div>
       </div>
 
-      <div aria-live="polite" style={{ marginTop: '12px', minHeight: '20px', fontSize: '13px', color: 'var(--accent-blue)', fontWeight: 500 }}>
+      {showPrivacy && (
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '12px', color: 'var(--text-secondary)', backgroundColor: 'var(--bg-secondary)', padding: '10px 14px', borderRadius: '6px', marginBottom: '16px', border: '1px solid var(--border-color)' }}>
+          <span style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+            <span>🛡️</span>
+            <span><strong>Human Review Required:</strong> CardiPal does not scan your text. Please verify you have removed all personal or sensitive information before pasting into any AI tool.</span>
+          </span>
+          <button 
+            type="button" 
+            aria-label="Dismiss privacy reminder"
+            onClick={() => setShowPrivacy(false)} 
+            style={{ background: 'none', border: 'none', cursor: 'pointer', padding: '0 4px', color: 'currentColor', opacity: 0.6, fontSize: '14px' }}
+          >✕</button>
+        </div>
+      )}
+
+      {/* INSERT THIS NEW BLOCK HERE */}
+      <div style={{ padding: '12px 14px', backgroundColor: 'var(--bg-secondary)', borderLeft: '3px solid var(--accent-blue, #0284c7)', borderRadius: '4px 8px 8px 4px', fontSize: '12px', color: 'var(--text-secondary)', lineHeight: '1.5', marginBottom: '16px' }}>
+        <strong style={{ color: 'var(--text-primary)' }}>After AI responds:</strong> Check important claims against original sources. Recalculate key numbers, question conclusions without evidence, and mark what remains uncertain before using the answer. <em>CardiPal does not verify it for you.</em>
+      </div>
+
+      <div aria-live="polite" style={{ marginBottom: '12px', minHeight: '20px', fontSize: '13px', color: 'var(--accent-blue)', fontWeight: 500 }}>
         {copyFeedback}
       </div>
 
@@ -348,8 +405,8 @@ export function PromptEditor({
           {pendingAction === 'Original' ? 'Copying...' : 'Copy Original'}
         </button>
         <button 
-          className="primary" disabled={!builderResult.success || pendingAction !== null} 
-          onClick={() => builderResult.success && executeCopy(builderResult.prompt, 'Prompt')}
+          className="primary" disabled={!builderResult.success || !displayPrompt || pendingAction !== null} 
+          onClick={() => builderResult.success && executeCopy(displayPrompt, 'Prompt')}
         >
           {pendingAction === 'Prompt' ? 'Copying...' : 'Copy Prompt'}
         </button>

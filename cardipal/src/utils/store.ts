@@ -1,5 +1,5 @@
 import { invoke } from '@tauri-apps/api/core';
-import type { StoreSnapshot } from '../types';
+import type { StoreSnapshot, Template } from '../types';
 
 export interface StoreErrorPayload {
   code: string;
@@ -47,7 +47,32 @@ export async function loadUserData(): Promise<LoadResult> {
 
 export async function saveUserDataSnapshot(snapshot: StoreSnapshot): Promise<SaveResult> {
   try {
-    await invoke('save_user_data', { snapshot });
+    const sanitizedTemplates = snapshot.templates.map(t => {
+      const sanitized: Template = {
+        id: t.id,
+        schemaVersion: t.schemaVersion,
+        name: t.name,
+        category: t.category || "",
+        contextText: t.contextText || "",
+        taskText: t.taskText || "",
+        formatText: t.formatText || "",
+        variables: t.variables || [],
+        isBuiltIn: t.isBuiltIn || false,
+        createdAt: t.createdAt,
+        updatedAt: t.updatedAt,
+        strategyNote: t.strategyNote || "" 
+      };
+      
+      return sanitized;
+    });
+
+    const sanitizedSnapshot = { 
+      ...snapshot, 
+      templates: sanitizedTemplates,
+      savedPrompts: snapshot.savedPrompts || []
+    };
+    
+    await invoke('save_user_data', { snapshot: sanitizedSnapshot });
     return { success: true };
   } catch (err) {
     const parsed = parseError(err);

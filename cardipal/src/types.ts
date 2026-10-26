@@ -10,6 +10,7 @@ export interface Template {
   isBuiltIn: boolean;
   createdAt: number; 
   updatedAt: number; 
+  strategyNote?: string; 
 }
 
 export interface Variable {
@@ -29,8 +30,17 @@ export interface Preferences {
   dataRevision: number;
 }
 
+export interface SavedPrompt {
+  id: string;
+  title: string;
+  text: string;
+  createdAt: number;
+  updatedAt: number;
+}
+
 export interface StoreSnapshot {
   templates: Template[];
+  savedPrompts?: SavedPrompt[]; 
   preferences: Preferences;
 }
 

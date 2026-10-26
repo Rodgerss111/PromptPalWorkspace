@@ -8,7 +8,7 @@ import { requestVisibility, toggleVisibility } from './utils/window';
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
 import { getCurrentWindow, Window } from '@tauri-apps/api/window';
-import type { Template, SessionState, Preferences, StoreSnapshot, Variable } from './types';
+import type { Template, SessionState, Preferences, StoreSnapshot, Variable, SavedPrompt } from './types';
 import './App.css';
 
 type ConfirmState = {
@@ -42,6 +42,10 @@ export type SessionAction =
   | { type: 'SET_BUILDER_SESSION'; builderSession: BuilderSession | null }
   | { type: 'SET_COPY_FEEDBACK'; value: string }
   | { type: 'APPEND_TO_DRAFT'; section: 'contextText' | 'taskText' | 'formatText'; textToAppend: string; newVariables: Variable[] }
+  | { type: 'UPDATE_FREEFORM_DRAFT'; text: string }
+  | { type: 'UPDATE_FREEFORM_TITLE'; title: string }
+  | { type: 'SET_FREEFORM_ACTIVE'; id: string | null; title: string; text: string }
+  | { type: 'CLEAR_FREEFORM' }
   | { type: 'CLEAR' };
 
 export interface WorkflowState {
@@ -51,6 +55,11 @@ export interface WorkflowState {
   draftVariables: Record<string, string>;
   builderSession: BuilderSession | null;
   copyFeedback: string;
+  freeformId: string | null;
+  freeformTitle: string;
+  freeformOriginalTitle: string;
+  freeformOriginalText: string;
+  freeformDraft: string;
 }
 
 export const initialWorkflowState: WorkflowState = {
@@ -60,6 +69,11 @@ export const initialWorkflowState: WorkflowState = {
   draftVariables: {},
   builderSession: null,
   copyFeedback: '',
+  freeformId: null,
+  freeformTitle: '',
+  freeformOriginalTitle: '',
+  freeformOriginalText: '',
+  freeformDraft: '',
 };
 
 export function reduceWorkflow(state: WorkflowState, action: SessionAction): WorkflowState {
@@ -100,6 +114,21 @@ export function reduceWorkflow(state: WorkflowState, action: SessionAction): Wor
 
       return { ...state, draftTemplate: updatedTemplate, draftVariables: newDraftVariables };
     }
+    case 'UPDATE_FREEFORM_DRAFT':
+      return { ...state, freeformDraft: action.text };
+    case 'UPDATE_FREEFORM_TITLE':
+      return { ...state, freeformTitle: action.title };
+    case 'SET_FREEFORM_ACTIVE':
+      return { 
+        ...state, 
+        freeformId: action.id, 
+        freeformTitle: action.title, 
+        freeformOriginalTitle: action.title,
+        freeformOriginalText: action.text, 
+        freeformDraft: action.text 
+      };
+    case 'CLEAR_FREEFORM':
+      return { ...state, freeformId: null, freeformTitle: '', freeformOriginalTitle: '', freeformOriginalText: '', freeformDraft: '' };
     case 'CLEAR':
       return initialWorkflowState;
     default: {
@@ -110,8 +139,18 @@ export function reduceWorkflow(state: WorkflowState, action: SessionAction): Wor
 }
 
 export default function App() {
-  const [theme, setTheme] = useState<'dark' | 'light'>('light');
-  const [viewState, setViewState] = useState<'capture' | 'library' | 'editor' | 'builder'>('capture');
+  const [themeState, setThemeState] = useState<'dark' | 'light'>(() => {
+    return (localStorage.getItem('cardipal_theme') as 'dark' | 'light') || 'light';
+  });
+  
+  const setTheme = (val: 'dark' | 'light') => {
+    setThemeState(val);
+    localStorage.setItem('cardipal_theme', val);
+  };
+
+  const [viewState, setViewState] = useState<'capture' | 'library' | 'editor' | 'builder' | 'freeform'>('capture');
+  const [libraryTab, setLibraryTab] = useState<'templates' | 'prompts' | 'favorites'>('templates');
+  const [librarySearch, setLibrarySearch] = useState('');
   const [focusRequested, setFocusRequested] = useState(false);
   
   const [launcherVisible, setLauncherVisible] = useState(true);
@@ -123,6 +162,7 @@ export default function App() {
   const sessionRef = useRef<SessionState | null>(null);
   
   const [customTemplates, setCustomTemplates] = useState<Template[]>([]);
+  const [savedPrompts, setSavedPrompts] = useState<SavedPrompt[]>([]);
   const builtInTemplatesRef = useRef<Template[]>([]);
   const [favoriteIds, setFavoriteIds] = useState<string[]>([]);
   const dataRevisionRef = useRef<number>(1);
@@ -141,6 +181,7 @@ export default function App() {
   const [isSaving, setIsSaving] = useState(false);
   
   const inputRef = useRef<HTMLTextAreaElement>(null);
+  const scrollableRef = useRef<HTMLDivElement>(null);
   const storageBusy = useRef(false);
 
   const [pendingAction, setPendingAction] = useState<'Prompt' | 'Original' | null>(null);
@@ -150,6 +191,12 @@ export default function App() {
   const feedbackTimer = useRef<number | null>(null);
   const isMounted = useRef<boolean>(true);
   const currentActivationId = useRef<number>(0);
+
+  useEffect(() => {
+    if (viewState === 'freeform' && scrollableRef.current) {
+      scrollableRef.current.scrollTop = 0;
+    }
+  }, [viewState]);
 
   const dispatchWorkflow = useCallback((action: SessionAction) => {
     if (action.type === 'CLEAR' && isWriting.current) {
@@ -199,6 +246,7 @@ export default function App() {
           const snap = result.snapshot;
           builtInTemplatesRef.current = snap.templates.filter(t => t.isBuiltIn);
           setCustomTemplates(snap.templates.filter(t => !t.isBuiltIn));
+          setSavedPrompts(snap.savedPrompts || []);
           setFavoriteIds(snap.preferences.favoriteTemplateIds);
           preferencesRef.current = snap.preferences;
           dataRevisionRef.current = snap.preferences.dataRevision;
@@ -239,8 +287,8 @@ export default function App() {
   }, []);
 
   useEffect(() => {
-    document.body.className = theme === 'dark' ? 'dark-theme' : 'light-theme';
-  }, [theme]);
+    document.body.className = themeState === 'dark' ? 'dark-theme' : 'light-theme';
+  }, [themeState]);
 
   useEffect(() => {
     isMounted.current = true;
@@ -484,7 +532,12 @@ export default function App() {
     setViewState('editor');
   };
 
-  const executePessimisticSave = async (newTemplates: Template[], newFavorites: string[], newIconVisible?: boolean): Promise<boolean> => {
+  const executePessimisticSave = async (
+    newTemplates: Template[], 
+    newFavorites: string[], 
+    newIconVisible?: boolean,
+    newSavedPrompts: SavedPrompt[] = savedPrompts
+  ): Promise<boolean> => {
     if (isReadOnly || storageBusy.current || !preferencesRef.current) return false;
     storageBusy.current = true;
     setIsSaving(true);
@@ -495,6 +548,7 @@ export default function App() {
     try {
       const snapshot: StoreSnapshot = {
         templates: [...builtInTemplatesRef.current, ...newTemplates],
+        savedPrompts: newSavedPrompts,
         preferences: {
           ...preferencesRef.current,
           favoriteTemplateIds: newFavorites,
@@ -507,6 +561,7 @@ export default function App() {
       if (result.success) {
         setCustomTemplates(newTemplates);
         setFavoriteIds(newFavorites);
+        setSavedPrompts(newSavedPrompts);
         preferencesRef.current = snapshot.preferences;
         dataRevisionRef.current += 1; 
         return true;
@@ -528,6 +583,37 @@ export default function App() {
     } finally {
       storageBusy.current = false;
       setIsSaving(false);
+    }
+  };
+
+  const handleSaveFreeform = async () => {
+    const isNew = !workflow.freeformId;
+    const now = Date.now();
+    let updatedPrompts: SavedPrompt[];
+    let activeId = workflow.freeformId;
+
+    if (isNew) {
+      activeId = crypto.randomUUID();
+      const newPrompt: SavedPrompt = {
+        id: activeId,
+        title: workflow.freeformTitle.trim(),
+        text: workflow.freeformDraft.trim(),
+        createdAt: now,
+        updatedAt: now
+      };
+      updatedPrompts = [...savedPrompts, newPrompt];
+    } else {
+      updatedPrompts = savedPrompts.map(p => 
+        p.id === activeId 
+          ? { ...p, title: workflow.freeformTitle.trim(), text: workflow.freeformDraft.trim(), updatedAt: now } 
+          : p
+      );
+    }
+
+    const success = await executePessimisticSave(customTemplates, favoriteIds, undefined, updatedPrompts);
+    if (success) {
+      dispatchWorkflow({ type: 'SET_FREEFORM_ACTIVE', id: activeId, title: workflow.freeformTitle.trim(), text: workflow.freeformDraft.trim() });
+      showInfo('Prompt saved successfully.');
     }
   };
 
@@ -655,10 +741,10 @@ export default function App() {
       : { bg: '#f0f9ff', text: '#0369a1', border: '#7dd3fc' };
   };
 
-  const msgStyles = floatingMessage ? getMessageStyles(floatingMessage.type, theme === 'dark') : null;
+  const msgStyles = floatingMessage ? getMessageStyles(floatingMessage.type, themeState === 'dark') : null;
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', height: '100vh', position: 'relative' }}>
+    <div style={{ display: 'flex', flexDirection: 'column', height: '100vh', position: 'relative', backgroundColor: 'var(--bg-primary)' }}>
       
       {floatingMessage && msgStyles && (
         <div
@@ -730,8 +816,8 @@ export default function App() {
             aria-labelledby="confirm-title" 
             onClick={(e) => e.stopPropagation()}
             style={{
-              backgroundColor: 'var(--bg-primary, #ffffff)',
-              border: '1px solid var(--border-color, #e5e7eb)',
+              backgroundColor: 'var(--bg-primary)',
+              border: '1px solid var(--border-color)',
               borderRadius: '16px',
               padding: '28px',
               width: '100%',
@@ -743,7 +829,7 @@ export default function App() {
             <h3 id="confirm-title" style={{ margin: '0 0 12px 0', fontSize: '20px', fontWeight: 600, color: 'var(--text-primary)' }}>
               Confirm Action
             </h3>
-            <p style={{ margin: '0 0 28px 0', fontSize: '15px', color: 'var(--text-secondary, #666)', lineHeight: '1.5' }}>
+            <p style={{ margin: '0 0 28px 0', fontSize: '15px', color: 'var(--text-secondary)', lineHeight: '1.5' }}>
               {confirmState.message}
             </p>
             <div style={{ display: 'flex', gap: '12px', justifyContent: 'center' }}>
@@ -776,101 +862,235 @@ export default function App() {
         style={{ height: '12px', flexShrink: 0, cursor: 'move' }}
       />
       
-      {(viewState === 'capture' || viewState === 'library') && (
-        <button
-          className="secondary theme-toggle"
-          type="button"
-          aria-pressed={theme === 'dark'}
-          onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')}
-        >
-          {theme === 'light' ? 'Dark Mode' : 'Light Mode'}
-        </button>
-      )}
-      
-      <div data-scrollable style={{ flex: 1, overflowY: 'auto', paddingBottom: '24px' }}>
-        {viewState === 'builder' && builderSession && (
-          <TemplateBuilder 
-            session={builderSession}
-            onSave={handleSaveBuilderTemplate}
-            onCancel={() => {
-              clearMessage();
-              dispatchWorkflow({ type: 'SET_BUILDER_SESSION', builderSession: null });
-              setViewState('library');
-            }}
-            isSaving={isSaving}
-            storageLocked={isReadOnly}
-            requestConfirmation={requestConfirmation}
-          />
+      {/* ROOT CONTAINER: Structurally separates Fixed Headers from Scrollable Bodies */}
+      <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+        
+        {viewState === 'freeform' && (
+          <div ref={scrollableRef} data-scrollable className="animate-panel" style={{ flex: 1, overflowY: 'auto', padding: '16px 20px', display: 'flex', flexDirection: 'column', boxSizing: 'border-box', maxWidth: '600px', margin: '0 auto', width: '100%' }}>
+            <h2 style={{ fontSize: '20px', fontWeight: 600, marginTop: 0, marginBottom: '6px', flexShrink: 0 }}>
+              {workflow.freeformId ? 'Edit Prompt' : 'Freeform Prompt'}
+            </h2>
+            <div style={{ fontSize: '12px', color: 'var(--text-secondary)', marginBottom: '12px', flexShrink: 0 }}>
+              Write or paste your prompt directly. <strong>Tip:</strong> State your goal and output clearly.
+            </div>
+
+            <textarea 
+              value={workflow.freeformDraft}
+              onChange={(e) => dispatchWorkflow({ type: 'UPDATE_FREEFORM_DRAFT', text: e.target.value })}
+              placeholder="Type your complete prompt here..."
+              style={{ flex: 1, minHeight: '80px', width: '100%', padding: '12px', fontFamily: 'inherit', fontSize: '13px', lineHeight: '1.5', border: '1px solid var(--border-color)', borderRadius: '6px', marginBottom: '16px', resize: 'none', boxSizing: 'border-box' }}
+            />
+
+            <div style={{ padding: '12px', backgroundColor: 'var(--bg-secondary)', borderRadius: '8px', marginBottom: '16px', flexShrink: 0, boxSizing: 'border-box' }}>
+              <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+                <input 
+                  id="ff-title" type="text" placeholder="Title for My Prompts" 
+                  value={workflow.freeformTitle} onChange={(e) => dispatchWorkflow({ type: 'UPDATE_FREEFORM_TITLE', title: e.target.value })}
+                  style={{ flex: 1, padding: '8px 12px', fontSize: '13px', boxSizing: 'border-box' }}
+                />
+                <button 
+                  className="secondary" 
+                  disabled={!workflow.freeformTitle.trim() || !workflow.freeformDraft.trim() || isSaving}
+                  onClick={handleSaveFreeform}
+                  style={{ padding: '8px 16px', fontSize: '13px', flexShrink: 0 }}
+                >
+                  Save
+                </button>
+              </div>
+            </div>
+
+            <div className="action-row" style={{ marginTop: 'auto', flexShrink: 0, flexWrap: 'nowrap', overflowX: 'auto', gap: '8px' }}>
+              <button className="secondary" style={{ whiteSpace: 'nowrap' }} onClick={() => { setViewState('capture'); clearMessage(); }}>Back</button>
+              <button className="secondary" style={{ whiteSpace: 'nowrap' }} onClick={() => {
+                requestConfirmation('Discard current text and start fresh?', () => {
+                  dispatchWorkflow({ type: 'CLEAR_FREEFORM' }); clearMessage();
+                });
+              }}>Start Fresh</button>
+              <button className="secondary" style={{ whiteSpace: 'nowrap' }} disabled={!workflow.freeformDraft.trim() || isSaving} onClick={() => {
+                dispatchWorkflow({
+                  type: 'SET_BUILDER_SESSION',
+                  builderSession: {
+                    mode: 'create',
+                    template: {
+                      id: crypto.randomUUID(), schemaVersion: 1, name: workflow.freeformTitle.trim() || 'Custom Template', category: '', contextText: '', taskText: workflow.freeformDraft, formatText: '',
+                      variables: [{ name: 'user_input', label: 'Primary Input', required: true, defaultValue: '' }],
+                      isBuiltIn: false, createdAt: Date.now(), updatedAt: Date.now(), strategyNote: ''
+                    }
+                  }
+                });
+                setViewState('builder');
+              }}>To Template</button>
+              <button className="primary" style={{ whiteSpace: 'nowrap', marginLeft: 'auto' }} disabled={!workflow.freeformDraft.trim() || pendingAction !== null} onClick={() => executeCopy(workflow.freeformDraft, 'Prompt')}>
+                {pendingAction === 'Prompt' ? 'Copying...' : 'Copy'}
+              </button>
+            </div>
+          </div>
         )}
+
+        {viewState === 'builder' && builderSession && (
+          <div data-scrollable style={{ flex: 1, overflowY: 'auto' }}>
+            <TemplateBuilder 
+              session={builderSession}
+              onSave={async (template) => {
+                const success = await handleSaveBuilderTemplate(template);
+                return success;
+              }}
+              onCancel={() => {
+                clearMessage();
+                dispatchWorkflow({ type: 'SET_BUILDER_SESSION', builderSession: null });
+                if (workflow.freeformDraft.trim() || workflow.freeformId) { setViewState('freeform'); } else { setViewState('library'); }
+              }}
+              isSaving={isSaving}
+              storageLocked={isReadOnly}
+              requestConfirmation={requestConfirmation}
+            />
+          </div>
+        )}
+
         {viewState === 'editor' && session && draftTemplate && (
-          <PromptEditor 
-            draftTemplate={draftTemplate}
-            onTemplateChange={(updated) => dispatchWorkflow({ type: 'UPDATE_EDITOR', template: updated })}
-            draftVariables={draftVariables}
-            onVariablesChange={(updated) => dispatchWorkflow({ type: 'UPDATE_VARIABLES', values: updated })}
-            sessionState={session} 
-            onBack={goBackToLibrary}
-            pendingAction={pendingAction}
-            copyFeedback={copyFeedback}
-            executeCopy={executeCopy}
-            invalidateFeedback={invalidateFeedback}
-            allTemplates={allTemplates}
-            onAppendToDraft={(section, textToAppend, newVariables) => {
-              dispatchWorkflow({ type: 'APPEND_TO_DRAFT', section, textToAppend, newVariables });
-              invalidateFeedback();
-            }}
-          />
+          <div data-scrollable style={{ flex: 1, overflowY: 'auto' }}>
+            <PromptEditor 
+              draftTemplate={draftTemplate}
+              onTemplateChange={(updated) => dispatchWorkflow({ type: 'UPDATE_EDITOR', template: updated })}
+              draftVariables={draftVariables}
+              onVariablesChange={(updated) => dispatchWorkflow({ type: 'UPDATE_VARIABLES', values: updated })}
+              sessionState={session} 
+              onBack={goBackToLibrary}
+              pendingAction={pendingAction}
+              copyFeedback={copyFeedback}
+              executeCopy={executeCopy}
+              invalidateFeedback={invalidateFeedback}
+              allTemplates={allTemplates}
+              onAppendToDraft={(section, textToAppend, newVariables) => {
+                dispatchWorkflow({ type: 'APPEND_TO_DRAFT', section, textToAppend, newVariables });
+                invalidateFeedback();
+              }}
+            />
+          </div>
         )}
 
         {viewState === 'library' && (
-          <div style={{ maxWidth: '600px', margin: '0 auto' }}>
-             <div className="library-header">
-               <h2 className="library-title">Template Library</h2>
-                <div style={{ display: 'flex', gap: '12px', alignItems: 'center' }}>
-                  <button className="secondary" onClick={goHome}>Home</button>
-                  <button className="primary" onClick={() => { dispatchWorkflow({ type: 'SET_BUILDER_SESSION', builderSession: { mode: 'create', template: null } }); setViewState('builder'); }} disabled={isSaving || isReadOnly}>
-                    Create Template
-                  </button>
-                  <button className="secondary" style={{ color: 'var(--danger-text)', borderColor: 'var(--danger-text)', opacity: isSaving ? 0.5 : 1 }} disabled={isSaving || pendingAction !== null} onClick={handleResetStorage}>
-                    Clear All Data
-                  </button>
-                </div>
+          <div className="animate-panel" style={{ flex: 1, display: 'flex', flexDirection: 'column', minHeight: 0, maxWidth: '600px', margin: '0 auto', width: '100%', boxSizing: 'border-box' }}>
+             
+             {/* PHYSICALLY SEPARATE HEADER (Not Sticky, Does not Hover) */}
+             <div style={{ flexShrink: 0, padding: '16px 20px 12px 20px', borderBottom: '1px solid var(--border-color)' }}>
+               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px', flexWrap: 'wrap', gap: '8px' }}>
+                  <div style={{ display: 'flex', gap: '12px', alignItems: 'baseline', flexWrap: 'wrap' }}>
+                    <h2 style={{ fontSize: '18px', margin: 0, fontWeight: 600 }}>Library</h2>
+                    <div style={{ display: 'flex', gap: '12px' }}>
+                      <button style={{ background: 'none', border: 'none', padding: 0, fontSize: '13px', fontWeight: libraryTab === 'templates' ? 600 : 400, color: libraryTab === 'templates' ? 'var(--text-primary)' : 'var(--text-secondary)', cursor: 'pointer' }} onClick={() => setLibraryTab('templates')}>Templates</button>
+                      <button style={{ background: 'none', border: 'none', padding: 0, fontSize: '13px', fontWeight: libraryTab === 'prompts' ? 600 : 400, color: libraryTab === 'prompts' ? 'var(--text-primary)' : 'var(--text-secondary)', cursor: 'pointer' }} onClick={() => setLibraryTab('prompts')}>Prompts</button>
+                      <button style={{ background: 'none', border: 'none', padding: 0, fontSize: '13px', fontWeight: libraryTab === 'favorites' ? 600 : 400, color: libraryTab === 'favorites' ? 'var(--text-primary)' : 'var(--text-secondary)', cursor: 'pointer' }} onClick={() => setLibraryTab('favorites')}>Favorites</button>
+                    </div>
+                  </div>
+                  <div style={{ display: 'flex', gap: '4px', alignItems: 'center', marginLeft: 'auto' }}>
+                    <button className="secondary" style={{ padding: '4px 8px', fontSize: '12px' }} onClick={goHome}>Home</button>
+                    <button className="primary" style={{ padding: '4px 8px', fontSize: '12px' }} onClick={() => { dispatchWorkflow({ type: 'SET_BUILDER_SESSION', builderSession: { mode: 'create', template: null } }); setViewState('builder'); }} disabled={isSaving || isReadOnly}>+ New</button>
+                    <button style={{ background: 'none', border: 'none', padding: '4px', fontSize: '14px', cursor: 'pointer', color: 'var(--text-secondary)', display: 'flex', alignItems: 'center', justifyContent: 'center' }} onClick={() => setTheme(themeState === 'dark' ? 'light' : 'dark')} title={themeState === 'dark' ? 'Switch to Light Mode' : 'Switch to Dark Mode'} aria-label={themeState === 'dark' ? 'Switch to Light Mode' : 'Switch to Dark Mode'}>
+                      {themeState === 'light' ? '🌙' : '☀️'}
+                    </button>
+                  </div>
+               </div>
+               
+               <input 
+                 type="text" 
+                 placeholder="Search library..." 
+                 value={librarySearch}
+                 onChange={e => setLibrarySearch(e.target.value)}
+                 style={{ width: '100%', padding: '8px 12px', fontSize: '13px', border: '1px solid var(--border-color)', borderRadius: '6px', boxSizing: 'border-box' }}
+                 aria-label="Search library"
+               />
              </div>
-             <TemplateLibrary 
-                templates={allTemplates}
-                favoriteIds={favoriteIds}
-                onSelectTemplate={handleSelectTemplate}
-                onToggleFavorite={isReadOnly || isSaving ? () => {} : toggleFavorite}
-                onEditTemplate={(t, mode) => { dispatchWorkflow({ type: 'SET_BUILDER_SESSION', builderSession: { mode, template: t } }); setViewState('builder'); }}
-                onDeleteTemplate={handleDeleteTemplate}
-                mutationsDisabled={isReadOnly || isSaving}
-             />
+
+             {/* INDEPENDENT SCROLLING LIST */}
+             <div ref={scrollableRef} data-scrollable style={{ flex: 1, overflowY: 'auto', padding: '16px 20px 24px 20px' }}>
+               {libraryTab === 'templates' || libraryTab === 'favorites' ? (
+                 <TemplateLibrary 
+                    templates={libraryTab === 'favorites' ? allTemplates.filter(t => favoriteIds.includes(t.id)) : allTemplates}
+                    favoriteIds={favoriteIds}
+                    searchQuery={librarySearch}
+                    theme={themeState} // <--- PASSED HERE
+                    onSelectTemplate={handleSelectTemplate}
+                    onToggleFavorite={isReadOnly || isSaving ? () => {} : toggleFavorite}
+                    onEditTemplate={(t, mode) => { dispatchWorkflow({ type: 'SET_BUILDER_SESSION', builderSession: { mode, template: t } }); setViewState('builder'); }}
+                    onDeleteTemplate={handleDeleteTemplate}
+                    mutationsDisabled={isReadOnly || isSaving}
+                 />
+               ) : (
+                 <div style={{ display: 'flex', flexDirection: 'column', backgroundColor: 'var(--bg-secondary)', border: '1px solid var(--border-color)', borderRadius: '8px', overflow: 'hidden' }}>
+                   {savedPrompts.filter(p => p.title.toLowerCase().includes(librarySearch.toLowerCase()) || p.text.toLowerCase().includes(librarySearch.toLowerCase())).length === 0 ? (
+                     <p style={{ color: 'var(--text-secondary)', fontSize: '13px', margin: '20px 0', textAlign: 'center' }}>No saved prompts found.</p>
+                   ) : (
+                     savedPrompts.filter(p => p.title.toLowerCase().includes(librarySearch.toLowerCase()) || p.text.toLowerCase().includes(librarySearch.toLowerCase())).map((p, index, arr) => (
+                       <div key={p.id} style={{ display: 'flex', flexDirection: 'column', padding: '10px 12px', borderBottom: index === arr.length - 1 ? 'none' : '1px solid var(--border-color)', boxSizing: 'border-box' }}>
+                         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: '8px' }}>
+                           <button 
+                             onClick={() => {
+                               const openPrompt = () => {
+                                 dispatchWorkflow({ type: 'SET_FREEFORM_ACTIVE', id: p.id, title: p.title, text: p.text });
+                                 setViewState('freeform');
+                                 clearMessage();
+                               };
+                               const isDirty = workflow.freeformDraft !== workflow.freeformOriginalText || workflow.freeformTitle !== workflow.freeformOriginalTitle;
+                               if (isDirty) {
+                                 requestConfirmation('Discard unsaved changes to your current prompt?', openPrompt);
+                               } else {
+                                 openPrompt();
+                               }
+                             }}
+                             style={{ background: 'none', border: 'none', padding: 0, textAlign: 'left', fontSize: '13px', fontWeight: 600, color: 'var(--text-primary)', cursor: 'pointer', lineHeight: '1.3' }}
+                           >
+                             {p.title}
+                           </button>
+                           <div style={{ display: 'flex', gap: '4px', flexShrink: 0 }}>
+                             <button style={{ background: 'none', border: 'none', padding: '2px 4px', fontSize: '12px', color: 'var(--text-secondary)', cursor: 'pointer' }} disabled={pendingAction !== null} onClick={() => executeCopy(p.text, 'Prompt')}>Copy</button>
+                             <button style={{ background: 'none', border: 'none', padding: '2px 4px', fontSize: '12px', color: 'var(--danger-text)', cursor: 'pointer' }} disabled={isSaving} onClick={() => {
+                                requestConfirmation('Delete this saved prompt?', async () => {
+                                  const updated = savedPrompts.filter(sp => sp.id !== p.id);
+                                  const success = await executePessimisticSave(customTemplates, favoriteIds, undefined, updated);
+                                  if (success && workflow.freeformId === p.id) {
+                                    dispatchWorkflow({ type: 'CLEAR_FREEFORM' });
+                                  }
+                                });
+                             }}>Delete</button>
+                           </div>
+                         </div>
+                         <div style={{ fontSize: '12px', color: 'var(--text-secondary)', display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden', marginTop: '4px' }}>
+                           {p.text}
+                         </div>
+                       </div>
+                     ))
+                   )}
+                 </div>
+               )}
+             </div>
           </div>
         )}
 
         {viewState === 'capture' && (
-          <div className="animate-panel" style={{ maxWidth: '500px', margin: '24px auto', padding: '0 20px' }}>
-            <h2 style={{ fontSize: '24px', fontWeight: 600, letterSpacing: '-0.02em', margin: '0 0 6px' }}>
+          <div ref={scrollableRef} data-scrollable className="animate-panel" style={{ flex: 1, overflowY: 'auto', padding: '24px 20px', display: 'flex', flexDirection: 'column', boxSizing: 'border-box', maxWidth: '500px', margin: '0 auto', width: '100%' }}>
+            
+            {/* Exactly Restored Original Headings */}
+            <h2 style={{ fontSize: '24px', fontWeight: 600, letterSpacing: '-0.02em', margin: '0 0 6px', flexShrink: 0 }}>
               Clear prompts, less effort
             </h2>
-            <p style={{ color: 'var(--text-secondary)', fontSize: '14px', lineHeight: '1.5', letterSpacing: '0.01em', margin: '0 0 14px 0', maxWidth: '440px' }}>
+            <p style={{ color: 'var(--text-secondary)', fontSize: '14px', lineHeight: '1.5', letterSpacing: '0.01em', margin: '0 0 14px 0', maxWidth: '440px', flexShrink: 0 }}>
               Turn your idea into a prompt that fits your goal. Choose a template, refine it, and copy it to your AI tool.
             </p>
 
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: '8px' }}>
-              <label htmlFor="manual-capture" style={{ fontSize: '14px', fontWeight: 500 }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: '6px', flexShrink: 0 }}>
+              <label htmlFor="manual-capture" style={{ fontSize: '13px', fontWeight: 500 }}>
                 What are you working on?
               </label>
               {manualInput.length === 0 && (
                 <button 
                   type="button" 
                   className="text-link"
+                  style={{ fontSize: '12px', padding: 0 }}
                   onClick={() => {
-                    if (workflowRef.current.manualInput.length === 0) {
-                      const example = "Explain the differences between standard polling and WebSockets for real-time data, focusing on resource overhead.";
-                      dispatchWorkflow({ type: 'UPDATE_INPUT', value: example });
-                      clearMessage();
-                    }
+                    const example = "Explain the differences between standard polling and WebSockets for real-time data, focusing on resource overhead.";
+                    dispatchWorkflow({ type: 'UPDATE_INPUT', value: example });
+                    clearMessage();
                   }}
                 >
                   Try an example
@@ -881,7 +1101,6 @@ export default function App() {
             <textarea
               ref={inputRef}
               id="manual-capture"
-              rows={4}
               value={manualInput}
               onChange={(e) => {
                 const value = e.target.value;
@@ -889,19 +1108,36 @@ export default function App() {
                 if (value.trim()) clearMessage();
               }}
               placeholder="A question, draft, code, or notes..."
+              style={{ flex: 1, minHeight: '80px', width: '100%', padding: '12px', fontFamily: 'inherit', fontSize: '13px', lineHeight: '1.5', border: '1px solid var(--border-color)', borderRadius: '6px', boxSizing: 'border-box', resize: 'none' }}
             />
 
-            <div className="action-row" style={{ justifyContent: 'flex-start', marginTop: '12px', flexWrap: 'wrap' }}>
-              <button className="primary" onClick={handleStartCapture}>Build prompt</button>
-              <button className="secondary" onClick={() => {
+            {/* Compact wrapped action row */}
+            <div className="action-row" style={{ justifyContent: 'flex-start', marginTop: '12px', display: 'flex', gap: '8px', flexWrap: 'wrap', flexShrink: 0 }}>
+              <button className="primary" style={{ padding: '6px 14px', fontSize: '13px', whiteSpace: 'nowrap' }} onClick={handleStartCapture}>Build</button>
+              
+              <button className="secondary" style={{ padding: '6px 14px', fontSize: '13px', whiteSpace: 'nowrap' }} onClick={() => {
+                if (!workflow.freeformDraft.trim() && manualInput.trim()) {
+                  dispatchWorkflow({ type: 'UPDATE_FREEFORM_DRAFT', text: manualInput });
+                }
+                setViewState('freeform');
+                clearMessage();
+              }}>
+                Freeform
+              </button>
+
+              <button className="secondary" style={{ padding: '6px 14px', fontSize: '13px', whiteSpace: 'nowrap' }} onClick={() => {
                 clearMessage();
                 setViewState('library');
               }}>
-                View templates
+                Library
               </button>
               
+              <button style={{ background: 'none', border: 'none', padding: '6px 10px', fontSize: '14px', cursor: 'pointer', color: 'var(--text-secondary)', marginLeft: 'auto' }} onClick={() => setTheme(themeState === 'dark' ? 'light' : 'dark')} title={themeState === 'dark' ? 'Switch to Light Mode' : 'Switch to Dark Mode'} aria-label={themeState === 'dark' ? 'Switch to Light Mode' : 'Switch to Dark Mode'}>
+                {themeState === 'light' ? '🌙' : '☀️'}
+              </button>
+
               <button 
-                className="secondary" 
+                style={{ background: 'none', border: 'none', padding: '6px 10px', fontSize: '14px', cursor: 'pointer', color: 'var(--text-secondary)' }}
                 disabled={isToggling}
                 onClick={async () => {
                   if (isToggling) return;
@@ -940,12 +1176,15 @@ export default function App() {
                     setIsToggling(false);
                   }
                 }}
+                title={launcherVisible ? 'Hide Cardi' : 'Show Cardi'} 
+                aria-label={launcherVisible ? 'Hide Cardi' : 'Show Cardi'}
               >
-                {isToggling ? 'Toggling...' : (launcherVisible ? 'Hide Cardi' : 'Show Cardi')}
+                {launcherVisible ? '➖' : '➕'}
               </button>
             </div>
           </div>
         )}
+
       </div>
       <div className="bottom-safe-bar" aria-hidden="true" />
     </div>
